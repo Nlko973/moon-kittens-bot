@@ -20,9 +20,11 @@ def init_db():
     )
     """)
 
+    # ⬇️ ДОБАВЛЕНО поле name, user_id сохранён
     cur.execute("""
     CREATE TABLE IF NOT EXISTS admins (
-        user_id INTEGER PRIMARY KEY
+        user_id INTEGER PRIMARY KEY,
+        name TEXT
     )
     """)
 
@@ -65,10 +67,14 @@ def clear_stats():
 
 # ---- ADMINS ----
 
-def add_admin(user_id: int):
+# ⬇️ ИЗМЕНЕНО: добавлено имя (старые ID не трогаются)
+def add_admin(user_id: int, name: str):
     conn = get_conn()
     cur = conn.cursor()
-    cur.execute("INSERT OR IGNORE INTO admins (user_id) VALUES (?)", (user_id,))
+    cur.execute(
+        "INSERT OR REPLACE INTO admins (user_id, name) VALUES (?, ?)",
+        (user_id, name)
+    )
     conn.commit()
     conn.close()
 
@@ -81,14 +87,24 @@ def del_admin(user_id: int):
     conn.close()
 
 
+# ⬇️ ИЗМЕНЕНО: возвращаем ID + имя
 def get_admins():
     conn = get_conn()
     cur = conn.cursor()
-    cur.execute("SELECT user_id FROM admins")
-    data = [row[0] for row in cur.fetchall()]
+    cur.execute("SELECT user_id, name FROM admins")
+    data = cur.fetchall()
     conn.close()
     return data
 
 
 def is_admin(user_id: int, owner_id: int):
-    return user_id == owner_id or user_id in get_admins()
+    if user_id == owner_id:
+        return True
+
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("SELECT 1 FROM admins WHERE user_id = ?", (user_id,))
+    result = cur.fetchone()
+    conn.close()
+
+    return result is not None
