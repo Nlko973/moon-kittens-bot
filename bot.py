@@ -33,7 +33,6 @@ dp = Dispatcher()
 
 class AdminStates(StatesGroup):
     waiting_add_id = State()
-    waiting_add_name = State()   # ⬅️ НОВОЕ
     waiting_del_id = State()
 
 # ================= KEYBOARDS =================
@@ -113,14 +112,7 @@ async def admins(message: Message):
         return
 
     admins_list = get_admins()
-
-    if not admins_list:
-        text = "👑 Админы:\n—"
-    else:
-        text = "👑 Админы:\n" + "\n".join(
-            f"{user_id} — {name if name else 'Без имени'}"
-            for user_id, name in admins_list
-        )
+    text = "👑 Админы:\n" + ("\n".join(str(a) for a in admins_list) or "—")
 
     await message.answer(
         text,
@@ -153,7 +145,7 @@ async def admin_del_cb(callback: CallbackQuery, state: FSMContext):
 # ================= FSM INPUT =================
 
 @dp.message(AdminStates.waiting_add_id)
-async def process_add_admin_id(message: Message, state: FSMContext):
+async def process_add_admin(message: Message, state: FSMContext):
     if message.from_user.id != OWNER_ID:
         return
 
@@ -161,22 +153,8 @@ async def process_add_admin_id(message: Message, state: FSMContext):
         await message.answer("❌ ID должен быть числом")
         return
 
-    await state.update_data(user_id=int(message.text))
-    await state.set_state(AdminStates.waiting_add_name)
-    await message.answer("👤 Укажи имя админа")
-
-
-@dp.message(AdminStates.waiting_add_name)
-async def process_add_admin_name(message: Message, state: FSMContext):
-    if message.from_user.id != OWNER_ID:
-        return
-
-    data = await state.get_data()
-    user_id = data["user_id"]
-    name = message.text.strip()
-
-    add_admin(user_id, name)
-    await message.answer(f"✅ Админ добавлен:\n{user_id} — {name}")
+    add_admin(int(message.text))
+    await message.answer("✅ Админ добавлен")
     await state.clear()
 
 
