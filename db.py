@@ -41,3 +41,50 @@ def get_all():
 def clear_all():
     cursor.execute("DELETE FROM users_stats")
     conn.commit()
+
+def create_admins_table():
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS admins (
+            user_id INTEGER PRIMARY KEY
+        )
+    """)
+    conn.commit()
+    conn.close()
+
+
+def add_admin(user_id: int):
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute("INSERT OR IGNORE INTO admins (user_id) VALUES (?)", (user_id,))
+    conn.commit()
+    conn.close()
+
+
+def remove_admin(user_id: int):
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute("DELETE FROM admins WHERE user_id = ?", (user_id,))
+    conn.commit()
+    conn.close()
+
+
+def get_admins() -> list[int]:
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute("SELECT user_id FROM admins")
+    rows = cur.fetchall()
+    conn.close()
+    return [row[0] for row in rows]
+
+
+def is_admin(user_id: int, owner_id: int) -> bool:
+    if user_id == owner_id:
+        return True
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute("SELECT 1 FROM admins WHERE user_id = ?", (user_id,))
+    result = cur.fetchone()
+    conn.close()
+    return result is not None
