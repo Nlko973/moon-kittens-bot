@@ -16,7 +16,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
 
-from config import BOT_TOKEN, OWNER_ID, MONTHLY_NORMA
+from config import BOT_TOKEN, OWNER_ID, MONTHLY_NORMA, GROUP_ID
 from db import (
     init_db,
     add_message,
@@ -27,17 +27,20 @@ from db import (
     is_admin
 )
 
+# ================= INIT =================
+
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
 
-# ===== FSM =====
+# ================= FSM =================
 
 class AdminStates(StatesGroup):
     waiting_add_id = State()
     waiting_add_name = State()
     waiting_del_id = State()
+    waiting_bot_message = State()
 
-# ===== KEYBOARDS =====
+# ================= KEYBOARDS =================
 
 main_kb = ReplyKeyboardMarkup(
     keyboard=[
@@ -55,11 +58,15 @@ def admins_inline_kb(is_owner: bool):
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text="➕ Добавить админа", callback_data="admin_add")],
-            [InlineKeyboardButton(text="➖ Удалить админа", callback_data="admin_del")]
+            [InlineKeyboardButton(text="➖ Удалить админа", callback_data="admin_del")],
+            [InlineKeyboardButton(
+                text="✉️ Написать от имени бота",
+                callback_data="bot_say"
+            )]
         ]
     )
 
-# ===== START =====
+# ================= START =================
 
 @dp.message(Command("start"))
 async def start(message: Message):
@@ -68,7 +75,7 @@ async def start(message: Message):
         reply_markup=main_kb
     )
 
-# ===== COUNT MESSAGES =====
+# ================= COUNT MESSAGES =================
 
 @dp.message(
     F.chat.type.in_({ChatType.GROUP, ChatType.SUPERGROUP}),
@@ -83,7 +90,7 @@ async def count_messages(message: Message):
     )
     add_message(message.from_user.id, username)
 
-# ===== STATS =====
+# ================= STATS =================
 
 @dp.message(F.text == "📊 Статистика")
 @dp.message(Command("stats"))
@@ -104,7 +111,7 @@ async def stats(message: Message):
 
     await message.answer("\n".join(lines))
 
-# ===== ADMINS LIST =====
+# ================= ADMINS LIST =================
 
 @dp.message(F.text == "👑 Админы")
 @dp.message(Command("admins"))
@@ -128,7 +135,20 @@ async def admins(message: Message):
         reply_markup=admins_inline_kb(message.from_user.id == OWNER_ID)
     )
 
-# ===== INLINE CALLBACKS =====
+# ================= INLINE CALLBACKS =================
+
+@dp.callback_query(F.data == "bot_say")
+async def bot_say_cb(callback: CallbackQuery, state: FSMContext):
+    if callback.from_user.id != OWNER_ID:
+        await callback.answer("Нет доступа", show_alert=True)
+        return
+
+    await state.set_state(AdminStates.waiting_bot_message)
+    await callback.message.answer(
+        "✏️ Напиши сообщение, которое бот отправит в группу"
+    )
+    await callback.answer()
+
 
 @dp.callback_query(F.data == "admin_add")
 async def admin_add_cb(callback: CallbackQuery, state: FSMContext):
@@ -151,7 +171,17 @@ async def admin_del_cb(callback: CallbackQuery, state: FSMContext):
     await callback.message.answer("🆔 Отправь ID админа для удаления")
     await callback.answer()
 
-# ===== FSM INPUT =====
+# ================= FSM INPUT =================
+
+@dp.message(AdminStates.waiting_bot_message)
+async def process_bot_message(message: Message, state: FSMContext):
+    if message.from_user.id != OWNER_ID:
+        return
+
+    await bot.send_message(GROUP_ID, message.text)
+    await message.answer("✅ Сообщение отправлено в группу")
+    await state.clear()
+
 
 @dp.message(AdminStates.waiting_add_id)
 async def process_add_admin_id(message: Message, state: FSMContext):
@@ -198,7 +228,7 @@ async def process_del_admin(message: Message, state: FSMContext):
     await message.answer("❌ Админ удалён")
     await state.clear()
 
-# ===== MAIN =====
+# ================= MAIN =================
 
 async def main():
     init_db()
