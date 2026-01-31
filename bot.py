@@ -1,5 +1,4 @@
 import asyncio
-
 from aiogram import Bot, Dispatcher, F
 from aiogram.types import (
     Message,
@@ -11,7 +10,6 @@ from aiogram.types import (
 )
 from aiogram.filters import Command
 from aiogram.enums import ChatType
-
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
@@ -20,9 +18,10 @@ from config import BOT_TOKEN, OWNER_ID, MONTHLY_NORMA, GROUP_ID
 from db import (
     init_db,
     add_message,
-    get_all_stats,
+    get_all,
+    get_user_count,
     add_admin,
-    del_admin,
+    remove_admin,
     get_admins,
     is_admin
 )
@@ -59,10 +58,7 @@ def admins_inline_kb(is_owner: bool):
         inline_keyboard=[
             [InlineKeyboardButton(text="➕ Добавить админа", callback_data="admin_add")],
             [InlineKeyboardButton(text="➖ Удалить админа", callback_data="admin_del")],
-            [InlineKeyboardButton(
-                text="✉️ Написать от имени бота",
-                callback_data="bot_say"
-            )]
+            [InlineKeyboardButton(text="✉️ Написать от имени бота", callback_data="bot_say")]
         ]
     )
 
@@ -90,6 +86,30 @@ async def count_messages(message: Message):
     )
     add_message(message.from_user.id, username)
 
+# ================= МОЯ НОРМА =================
+
+@dp.message(
+    F.chat.type.in_({ChatType.GROUP, ChatType.SUPERGROUP}),
+    F.text.lower() == "моя норма"
+)
+async def my_norma(message: Message):
+    user = message.from_user
+
+    username = (
+        f"@{user.username}"
+        if user.username
+        else user.full_name
+    )
+
+    count = get_user_count(user.id)
+
+    if count >= MONTHLY_NORMA:
+        text = f"{username}, у вас есть норма за месяц ✅"
+    else:
+        text = f"{username}, у вас нет нормы за месяц ❌"
+
+    await message.answer(text)
+
 # ================= STATS =================
 
 @dp.message(F.text == "📊 Статистика")
@@ -99,7 +119,7 @@ async def stats(message: Message):
         await message.answer("⛔ Нет доступа")
         return
 
-    data = get_all_stats()
+    data = get_all()
     if not data:
         await message.answer("Нет данных за этот месяц")
         return
@@ -111,7 +131,7 @@ async def stats(message: Message):
 
     await message.answer("\n".join(lines))
 
-# ================= ADMINS LIST =================
+# ================= ADMINS =================
 
 @dp.message(F.text == "👑 Админы")
 @dp.message(Command("admins"))
@@ -121,21 +141,20 @@ async def admins(message: Message):
         return
 
     admins_list = get_admins()
+
     if not admins_list:
         text = "👑 Админы:\n—"
     else:
-        lines = []
-        for user_id, name in admins_list:
-            display_name = name if name else "(без имени)"
-            lines.append(f"{user_id} — {display_name}")
-        text = "👑 Админы:\n" + "\n".join(lines)
+        text = "👑 Админы:\n" + "\n".join(
+            f"{user_id} — {name}" for user_id, name in admins_list
+        )
 
     await message.answer(
         text,
         reply_markup=admins_inline_kb(message.from_user.id == OWNER_ID)
     )
 
-# ================= INLINE CALLBACKS =================
+# ================= INLINE =================
 
 @dp.callback_query(F.data == "bot_say")
 async def bot_say_cb(callback: CallbackQuery, state: FSMContext):
@@ -144,9 +163,7 @@ async def bot_say_cb(callback: CallbackQuery, state: FSMContext):
         return
 
     await state.set_state(AdminStates.waiting_bot_message)
-    await callback.message.answer(
-        "✏️ Напиши сообщение, которое бот отправит в группу"
-    )
+    await callback.message.answer("✏️ Напиши сообщение для группы")
     await callback.answer()
 
 
@@ -157,7 +174,7 @@ async def admin_add_cb(callback: CallbackQuery, state: FSMContext):
         return
 
     await state.set_state(AdminStates.waiting_add_id)
-    await callback.message.answer("🆔 Отправь ID пользователя")
+    await callback.message.answer("🆔 Введи ID пользователя")
     await callback.answer()
 
 
@@ -168,63 +185,44 @@ async def admin_del_cb(callback: CallbackQuery, state: FSMContext):
         return
 
     await state.set_state(AdminStates.waiting_del_id)
-    await callback.message.answer("🆔 Отправь ID админа для удаления")
+    await callback.message.answer("🆔 Введи ID админа")
     await callback.answer()
 
-# ================= FSM INPUT =================
+# ================= FSM =================
 
 @dp.message(AdminStates.waiting_bot_message)
 async def process_bot_message(message: Message, state: FSMContext):
-    if message.from_user.id != OWNER_ID:
-        return
-
     await bot.send_message(GROUP_ID, message.text)
-    await message.answer("✅ Сообщение отправлено в группу")
+    await message.answer("✅ Отправлено")
     await state.clear()
 
 
 @dp.message(AdminStates.waiting_add_id)
 async def process_add_admin_id(message: Message, state: FSMContext):
-    if message.from_user.id != OWNER_ID:
-        return
-
     if not message.text.isdigit():
         await message.answer("❌ ID должен быть числом")
         return
 
     await state.update_data(user_id=int(message.text))
     await state.set_state(AdminStates.waiting_add_name)
-    await message.answer("✏️ Теперь отправь имя админа")
+    await message.answer("✏️ Введи имя админа")
 
 
 @dp.message(AdminStates.waiting_add_name)
 async def process_add_admin_name(message: Message, state: FSMContext):
-    if message.from_user.id != OWNER_ID:
-        return
-
-    name = message.text.strip()
-    if not name:
-        await message.answer("❌ Имя не может быть пустым")
-        return
-
     data = await state.get_data()
-    user_id = data["user_id"]
-
-    add_admin(user_id, name)
-    await message.answer(f"✅ Админ добавлен:\n{user_id} — {name}")
+    add_admin(data["user_id"], message.text.strip())
+    await message.answer("✅ Админ добавлен")
     await state.clear()
 
 
 @dp.message(AdminStates.waiting_del_id)
 async def process_del_admin(message: Message, state: FSMContext):
-    if message.from_user.id != OWNER_ID:
-        return
-
     if not message.text.isdigit():
         await message.answer("❌ ID должен быть числом")
         return
 
-    del_admin(int(message.text))
+    remove_admin(int(message.text))
     await message.answer("❌ Админ удалён")
     await state.clear()
 
