@@ -76,7 +76,8 @@ async def start(message: Message):
 @dp.message(
     F.chat.type.in_({ChatType.GROUP, ChatType.SUPERGROUP}),
     F.from_user.is_not(None),
-    F.text
+    F.text,
+    F.text.lower() != "моя норма"
 )
 async def count_messages(message: Message):
     username = (
@@ -85,6 +86,7 @@ async def count_messages(message: Message):
         else message.from_user.full_name
     )
     add_message(message.from_user.id, username)
+
 
 # ================= МОЯ НОРМА =================
 
