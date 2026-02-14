@@ -12,6 +12,7 @@ from app.runtime import bot
 from app.keyboards import (
     BTN_ADM_ADD_ADMIN,
     BTN_ADM_ADMINS,
+    BTN_ADM_DEL_ADMIN,
     BTN_ADM_CLEANUP_OFF,
     BTN_ADM_CLEANUP_ON,
     BTN_ADM_CLEANUP_SKIP,
@@ -900,4 +901,3 @@ async def btn_prompt_del_admin(message: Message):
         return
     await message.answer("Формат: /del_admin <user_id>")
 
-    BTN_ADM_DEL_ADMIN,
