@@ -6,6 +6,7 @@ from app.handlers.common import router as common_router
 from app.handlers.group_events import router as group_events_router
 from app.handlers.member import router as member_router
 from app.handlers.private_fallback import router as private_fallback_router
+from app.handlers.safety_start import router as safety_start_router
 
 
 def register_handlers(dp: Dispatcher):
@@ -14,4 +15,5 @@ def register_handlers(dp: Dispatcher):
     dp.include_router(member_router)
     dp.include_router(admin_router)
     dp.include_router(group_events_router)
+    dp.include_router(safety_start_router)
     dp.include_router(private_fallback_router)
