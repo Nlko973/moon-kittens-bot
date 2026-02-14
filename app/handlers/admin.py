@@ -1,5 +1,6 @@
 ﻿import re
-from datetime import datetime, time
+from datetime import datetime, time, timedelta
+from typing import Optional
 
 from aiogram import F, Router
 from aiogram.enums import ChatType
@@ -9,10 +10,12 @@ from aiogram.types import Message
 
 from app.runtime import bot
 from app.keyboards import (
+    BTN_ADM_ADD_ADMIN,
     BTN_ADM_ADMINS,
     BTN_ADM_CLEANUP_OFF,
     BTN_ADM_CLEANUP_ON,
     BTN_ADM_CLEANUP_SKIP,
+    BTN_ADM_CLEANUP_WHEN,
     BTN_ADM_TG_LINKS_OFF,
     BTN_ADM_TG_LINKS_ON,
     BTN_ADM_TG_LINKS_STATUS,
@@ -55,6 +58,7 @@ from db import (
     get_user_warns,
     get_weekly_norm,
     is_cleanup_enabled,
+    is_cleanup_skip_once_enabled,
     is_tg_links_block_enabled,
     remove_admin,
     remove_rest,
@@ -70,6 +74,28 @@ from db import (
 router = Router()
 
 
+def _next_cleanup_dt(now: Optional[datetime] = None) -> datetime:
+    now = now or datetime.now()
+    # Sunday 23:55 local server time
+    days_ahead = (6 - now.weekday()) % 7
+    candidate = (now + timedelta(days=days_ahead)).replace(hour=23, minute=55, second=0, microsecond=0)
+    if candidate <= now:
+        candidate = (candidate + timedelta(days=7)).replace(hour=23, minute=55, second=0, microsecond=0)
+    return candidate
+
+
+def _cleanup_status_text() -> str:
+    enabled = is_cleanup_enabled()
+    skip_once = is_cleanup_skip_once_enabled()
+    next_dt = _next_cleanup_dt()
+    base = f"Ближайшая чистка: {next_dt.strftime('%Y-%m-%d %H:%M:%S')}"
+    if not enabled:
+        return f"{base} (авточистка отключена)"
+    if skip_once:
+        return f"{base} (следующая будет пропущена)"
+    return f"{base} (включена)"
+
+
 @router.message(Command("norm_stats"))
 async def cmd_norm_stats(message: Message):
     if not await require_private_admin(message):
@@ -81,7 +107,11 @@ async def cmd_norm_stats(message: Message):
         await message.answer("ℹ️ Нет данных по текущей неделе.")
         return
 
-    lines = [f"📊 Недельная норма: {norm}.", f"Период: {week_period(message.date)}."]
+    lines = [
+        f"📊 Недельная норма: {norm}.",
+        f"Период: {week_period(message.date)}.",
+        f"🧹 {_cleanup_status_text()}",
+    ]
     for row in rows[:200]:
         mark = "✅" if row["count"] >= norm else "❌"
         lines.append(f"{format_user(row['username'], row['display_name'])} - {row['count']}/{norm} {mark}")
@@ -125,6 +155,13 @@ async def cmd_cleanup_skip_once(message: Message):
         return
     set_cleanup_skip_once(True)
     await message.answer("✅ Следующая чистка будет пропущена.")
+
+
+@router.message(Command("cleanup_when"))
+async def cmd_cleanup_when(message: Message):
+    if not await require_private_admin(message):
+        return
+    await message.answer(f"🧹 {_cleanup_status_text()}")
 
 
 @router.message(Command("tg_links_on"))
@@ -733,6 +770,11 @@ async def btn_cleanup_skip(message: Message):
     await cmd_cleanup_skip_once(message)
 
 
+@router.message(F.chat.type == ChatType.PRIVATE, F.text == BTN_ADM_CLEANUP_WHEN)
+async def btn_cleanup_when(message: Message):
+    await cmd_cleanup_when(message)
+
+
 @router.message(F.chat.type == ChatType.PRIVATE, F.text == BTN_ADM_TG_LINKS_ON)
 async def btn_tg_links_on(message: Message):
     await cmd_tg_links_on(message)
@@ -829,7 +871,12 @@ async def btn_prompt_kick(message: Message):
 async def btn_prompt_say(message: Message):
     if not await require_owner(message):
         return
-    await message.answer("Формат: /say <текст>")
+    await message.answer(
+        "Форматы:\n"
+        "/say <текст>\n"
+        "/say_photo <file_id> [подпись] или reply на фото\n"
+        "/say_gif <file_id> [подпись] или reply на GIF"
+    )
 
 
 @router.message(F.chat.type == ChatType.PRIVATE, F.text == BTN_ADM_PROMPT_SET_PARAM)
@@ -838,3 +885,19 @@ async def btn_prompt_set_param(message: Message):
         return
     names = ", ".join(PARAM_DEFAULTS.keys())
     await message.answer(f"Формат: /set_param <name> <value>\nДоступные name: {names}")
+
+
+@router.message(F.chat.type == ChatType.PRIVATE, F.text == BTN_ADM_ADD_ADMIN)
+async def btn_prompt_add_admin(message: Message):
+    if not await require_owner(message):
+        return
+    await message.answer("Формат: /add_admin <user_id> <имя>")
+
+
+@router.message(F.chat.type == ChatType.PRIVATE, F.text == BTN_ADM_DEL_ADMIN)
+async def btn_prompt_del_admin(message: Message):
+    if not await require_owner(message):
+        return
+    await message.answer("Формат: /del_admin <user_id>")
+
+    BTN_ADM_DEL_ADMIN,

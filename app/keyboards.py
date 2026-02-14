@@ -37,6 +37,8 @@ BTN_ADM_PROMPT_UNBAN = "Разбан"
 BTN_ADM_PROMPT_KICK = "Кик"
 BTN_ADM_PROMPT_SAY = "Написать в чат"
 BTN_ADM_PROMPT_SET_PARAM = "Параметр"
+BTN_ADM_ADD_ADMIN = "Добавить админа"
+BTN_ADM_DEL_ADMIN = "Удалить админа"
 
 
 def private_user_kb(is_admin: bool) -> ReplyKeyboardMarkup:
@@ -50,7 +52,7 @@ def private_user_kb(is_admin: bool) -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(keyboard=rows, resize_keyboard=True)
 
 
-def private_admin_panel_kb() -> ReplyKeyboardMarkup:
+def private_admin_panel_kb(is_owner: bool) -> ReplyKeyboardMarkup:
     rows = [
         [KeyboardButton(text=BTN_ADM_NORM_STATS), KeyboardButton(text=BTN_ADM_WARNS_ALL)],
         [KeyboardButton(text=BTN_ADM_RESTS), KeyboardButton(text=BTN_ADM_ADMINS)],
@@ -66,6 +68,8 @@ def private_admin_panel_kb() -> ReplyKeyboardMarkup:
         [KeyboardButton(text=BTN_ADM_PROMPT_SAY), KeyboardButton(text=BTN_ADM_PROMPT_SET_PARAM)],
         [KeyboardButton(text=BTN_ADM_SHOW_CONFIG), KeyboardButton(text=BTN_MENU)],
     ]
+    if is_owner:
+        rows.append([KeyboardButton(text=BTN_ADM_ADD_ADMIN), KeyboardButton(text=BTN_ADM_DEL_ADMIN)])
     return ReplyKeyboardMarkup(keyboard=rows, resize_keyboard=True)
 
 
