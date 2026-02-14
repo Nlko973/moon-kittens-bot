@@ -13,9 +13,34 @@ from app.services.moderation import issue_warn, mute_user
 from app.services.chat_settings import get_group_id
 from app.services.roles import apply_role_signature, remove_role_signature
 from app.services.targets import parse_target
-from db import mark_user_left
+from db import is_tg_links_block_enabled, mark_user_left
 
 router = Router()
+TG_LINK_RE = re.compile(r"(?i)(?:https?://)?(?:t|telegram)\.me/[^\s]+")
+
+
+def _message_has_tg_link(message: Message) -> bool:
+    text_chunks = []
+    if message.text:
+        text_chunks.append(message.text)
+    if message.caption:
+        text_chunks.append(message.caption)
+    body = "\n".join(text_chunks)
+    if body and TG_LINK_RE.search(body):
+        return True
+
+    entities = []
+    if message.entities:
+        entities.extend(message.entities)
+    if message.caption_entities:
+        entities.extend(message.caption_entities)
+
+    for entity in entities:
+        if entity.type == "text_link":
+            url = (entity.url or "").lower()
+            if "t.me/" in url or "telegram.me/" in url:
+                return True
+    return False
 
 
 @router.chat_member()
@@ -99,6 +124,22 @@ async def on_group_message(message: Message):
         return
     if message.chat.id != get_group_id():
         return
+
+    if is_tg_links_block_enabled() and not is_bot_admin(message.from_user.id):
+        if _message_has_tg_link(message):
+            try:
+                await bot.delete_message(message.chat.id, message.message_id)
+            except TelegramBadRequest:
+                pass
+
+            warn_id, total, _third = await issue_warn(
+                message.from_user.id,
+                0,
+                "Ссылка на Telegram-канал (запрещено)",
+                "tg_link",
+            )
+            await message.answer(f"⚠️ Ссылка запрещена. Выдан варн #{warn_id}. Активных варнов: {total}.")
+            return
 
     try:
         await add_message_and_guard(message)

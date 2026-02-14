@@ -13,6 +13,9 @@ from app.keyboards import (
     BTN_ADM_CLEANUP_OFF,
     BTN_ADM_CLEANUP_ON,
     BTN_ADM_CLEANUP_SKIP,
+    BTN_ADM_TG_LINKS_OFF,
+    BTN_ADM_TG_LINKS_ON,
+    BTN_ADM_TG_LINKS_STATUS,
     BTN_ADM_COMPLAINTS,
     BTN_ADM_COMPLAINT_DEL,
     BTN_ADM_NORM_STATS,
@@ -52,11 +55,13 @@ from db import (
     get_user_warns,
     get_weekly_norm,
     is_cleanup_enabled,
+    is_tg_links_block_enabled,
     remove_admin,
     remove_rest,
     remove_warn,
     set_cleanup_enabled,
     set_cleanup_skip_once,
+    set_tg_links_block_enabled,
     set_rest,
     set_rest_until,
     set_weekly_norm,
@@ -120,6 +125,30 @@ async def cmd_cleanup_skip_once(message: Message):
         return
     set_cleanup_skip_once(True)
     await message.answer("✅ Следующая чистка будет пропущена.")
+
+
+@router.message(Command("tg_links_on"))
+async def cmd_tg_links_on(message: Message):
+    if not await require_private_admin(message):
+        return
+    set_tg_links_block_enabled(True)
+    await message.answer("✅ Запрет TG-ссылок включен.")
+
+
+@router.message(Command("tg_links_off"))
+async def cmd_tg_links_off(message: Message):
+    if not await require_private_admin(message):
+        return
+    set_tg_links_block_enabled(False)
+    await message.answer("✅ Запрет TG-ссылок отключен.")
+
+
+@router.message(Command("tg_links_status"))
+async def cmd_tg_links_status(message: Message):
+    if not await require_private_admin(message):
+        return
+    status = "включен" if is_tg_links_block_enabled() else "выключен"
+    await message.answer(f"ℹ️ Запрет TG-ссылок сейчас: {status}.")
 
 
 @router.message(Command("rest_add"))
@@ -479,6 +508,64 @@ async def cmd_say(message: Message, command: CommandObject):
         await message.answer(f"⚠️ Не удалось отправить сообщение: {exc.message}")
 
 
+@router.message(Command("say_photo"))
+async def cmd_say_photo(message: Message, command: CommandObject):
+    if not await require_owner(message):
+        return
+
+    file_id = None
+    caption = (command.args or "").strip() or None
+
+    reply = message.reply_to_message
+    if reply and reply.photo:
+        file_id = reply.photo[-1].file_id
+
+    if not file_id and command.args:
+        parts = command.args.split(maxsplit=1)
+        file_id = parts[0]
+        caption = parts[1].strip() if len(parts) > 1 else None
+
+    if not file_id:
+        await message.answer("Формат: /say_photo <file_id> [подпись] или reply на фото с /say_photo [подпись]")
+        return
+
+    try:
+        await bot.send_photo(get_group_id(), photo=file_id, caption=caption)
+        await message.answer("✅ Фото отправлено.")
+    except TelegramBadRequest as exc:
+        await message.answer(f"⚠️ Не удалось отправить фото: {exc.message}")
+
+
+@router.message(Command("say_gif"))
+async def cmd_say_gif(message: Message, command: CommandObject):
+    if not await require_owner(message):
+        return
+
+    file_id = None
+    caption = (command.args or "").strip() or None
+
+    reply = message.reply_to_message
+    if reply and reply.animation:
+        file_id = reply.animation.file_id
+    elif reply and reply.document and reply.document.mime_type and "gif" in reply.document.mime_type.lower():
+        file_id = reply.document.file_id
+
+    if not file_id and command.args:
+        parts = command.args.split(maxsplit=1)
+        file_id = parts[0]
+        caption = parts[1].strip() if len(parts) > 1 else None
+
+    if not file_id:
+        await message.answer("Формат: /say_gif <file_id> [подпись] или reply на GIF с /say_gif [подпись]")
+        return
+
+    try:
+        await bot.send_animation(get_group_id(), animation=file_id, caption=caption)
+        await message.answer("✅ GIF отправлен.")
+    except TelegramBadRequest as exc:
+        await message.answer(f"⚠️ Не удалось отправить GIF: {exc.message}")
+
+
 @router.message(Command("set_group_id"))
 async def cmd_set_group_id(message: Message, command: CommandObject):
     if not await require_owner(message):
@@ -506,6 +593,7 @@ async def cmd_show_config(message: Message):
         f"GROUP_ID: {get_group_id()}",
         f"WEEKLY_NORM: {get_weekly_norm()}",
         f"CLEANUP_ENABLED: {'1' if is_cleanup_enabled() else '0'}",
+        f"TG_LINKS_BLOCK: {'1' if is_tg_links_block_enabled() else '0'}",
         f"inactivity_notice_days: {params['inactivity_notice_days']}",
         f"inactivity_warn_days: {params['inactivity_warn_days']}",
         f"spam_limit_count: {params['spam_limit_count']}",
@@ -643,6 +731,21 @@ async def btn_cleanup_off(message: Message):
 @router.message(F.chat.type == ChatType.PRIVATE, F.text == BTN_ADM_CLEANUP_SKIP)
 async def btn_cleanup_skip(message: Message):
     await cmd_cleanup_skip_once(message)
+
+
+@router.message(F.chat.type == ChatType.PRIVATE, F.text == BTN_ADM_TG_LINKS_ON)
+async def btn_tg_links_on(message: Message):
+    await cmd_tg_links_on(message)
+
+
+@router.message(F.chat.type == ChatType.PRIVATE, F.text == BTN_ADM_TG_LINKS_OFF)
+async def btn_tg_links_off(message: Message):
+    await cmd_tg_links_off(message)
+
+
+@router.message(F.chat.type == ChatType.PRIVATE, F.text == BTN_ADM_TG_LINKS_STATUS)
+async def btn_tg_links_status(message: Message):
+    await cmd_tg_links_status(message)
 
 
 @router.message(F.chat.type == ChatType.PRIVATE, F.text == BTN_ADM_ROLE_SET)

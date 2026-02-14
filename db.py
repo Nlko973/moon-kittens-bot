@@ -152,6 +152,9 @@ def init_db():
     if get_setting("cleanup_skip_once", cur) is None:
         set_setting("cleanup_skip_once", "0", cur)
 
+    if get_setting("tg_links_block", cur) is None:
+        set_setting("tg_links_block", "0", cur)
+
     conn.commit()
     conn.close()
 
@@ -219,12 +222,24 @@ def consume_cleanup_skip_once() -> bool:
     return should_skip
 
 
+def is_cleanup_skip_once_enabled() -> bool:
+    return get_setting("cleanup_skip_once", default="0") == "1"
+
+
 def get_last_cleanup_date() -> Optional[str]:
     return get_setting("last_cleanup_date")
 
 
 def set_last_cleanup_date(value: str):
     set_setting("last_cleanup_date", value)
+
+
+def is_tg_links_block_enabled() -> bool:
+    return get_setting("tg_links_block", default="0") == "1"
+
+
+def set_tg_links_block_enabled(enabled: bool):
+    set_setting("tg_links_block", "1" if enabled else "0")
 
 
 # users and stats
