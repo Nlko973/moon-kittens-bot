@@ -1,0 +1,1 @@
+# Moon Kittens Bot package
