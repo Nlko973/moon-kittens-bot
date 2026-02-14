@@ -1,4 +1,4 @@
-﻿import re
+import re
 from datetime import datetime, time, timedelta
 from typing import Optional
 
@@ -87,8 +87,8 @@ def _next_cleanup_dt(now: Optional[datetime] = None) -> datetime:
 
 def _cleanup_status_text() -> str:
     enabled = is_cleanup_enabled()
-    skip_once = is_cleanup_skip_once_enabled()
     next_dt = _next_cleanup_dt()
+    skip_once = is_cleanup_skip_once_enabled(next_dt)
     base = f"Ближайшая чистка: {next_dt.strftime('%Y-%m-%d %H:%M:%S')}"
     if not enabled:
         return f"{base} (авточистка отключена)"

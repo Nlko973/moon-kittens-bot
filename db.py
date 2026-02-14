@@ -1,4 +1,4 @@
-﻿import sqlite3
+import sqlite3
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
@@ -152,6 +152,9 @@ def init_db():
     if get_setting("cleanup_skip_once", cur) is None:
         set_setting("cleanup_skip_once", "0", cur)
 
+    if get_setting("cleanup_skip_week_start", cur) is None:
+        set_setting("cleanup_skip_week_start", "", cur)
+
     if get_setting("tg_links_block", cur) is None:
         set_setting("tg_links_block", "0", cur)
 
@@ -209,21 +212,43 @@ def is_cleanup_enabled() -> bool:
 
 def set_cleanup_enabled(enabled: bool):
     set_setting("cleanup_enabled", "1" if enabled else "0")
+    # Enabling cleanup explicitly also clears one-time skip.
+    if enabled:
+        set_cleanup_skip_once(False)
 
 
-def set_cleanup_skip_once(enabled: bool):
+def set_cleanup_skip_once(enabled: bool, at: Optional[datetime] = None):
+    # Skip is bound to the current week only (Mon-Sun) and never spills to next week.
     set_setting("cleanup_skip_once", "1" if enabled else "0")
+    if enabled:
+        set_setting("cleanup_skip_week_start", week_start_for(at))
+    else:
+        set_setting("cleanup_skip_week_start", "")
 
 
-def consume_cleanup_skip_once() -> bool:
-    should_skip = get_setting("cleanup_skip_once", default="0") == "1"
-    if should_skip:
+def consume_cleanup_skip_once(at: Optional[datetime] = None) -> bool:
+    at = at or datetime.now()
+    current_week = week_start_for(at)
+    skip_week = get_setting("cleanup_skip_week_start", default="") or ""
+    legacy_skip = get_setting("cleanup_skip_once", default="0") == "1"
+
+    should_skip = skip_week == current_week or (legacy_skip and not skip_week)
+
+    # Always clear old boolean flag; clear week marker when consumed.
+    if legacy_skip:
         set_setting("cleanup_skip_once", "0")
+    if should_skip:
+        set_setting("cleanup_skip_week_start", "")
+
     return should_skip
 
 
-def is_cleanup_skip_once_enabled() -> bool:
-    return get_setting("cleanup_skip_once", default="0") == "1"
+def is_cleanup_skip_once_enabled(at: Optional[datetime] = None) -> bool:
+    at = at or datetime.now()
+    current_week = week_start_for(at)
+    skip_week = get_setting("cleanup_skip_week_start", default="") or ""
+    legacy_skip = get_setting("cleanup_skip_once", default="0") == "1"
+    return skip_week == current_week or (legacy_skip and not skip_week)
 
 
 def get_last_cleanup_date() -> Optional[str]:
