@@ -1,38 +1,19 @@
-from datetime import datetime, timedelta
+﻿from datetime import datetime, timedelta
 from typing import Optional
-
 
 APP_NAME = "Moon Kittens Bot"
 
-
-def format_user(username: Optional[str], display_name: str) -> str:
-    return f"@{username}" if username else display_name
-
-
-def week_period(now: datetime) -> str:
-    monday = now.date() - timedelta(days=now.weekday())
-    sunday = monday + timedelta(days=6)
-    return f"{monday.isoformat()} - {sunday.isoformat()}"
-
-
-ACCESS_DENIED = "⛔ Нет доступа."
-OWNER_ONLY = "⛔ Команда доступна только владельцу бота."
-USER_NOT_FOUND = "⚠️ Не удалось определить пользователя. Используйте `id` или `@username` из базы."
+ACCESS_DENIED = "нет доступа"
+OWNER_ONLY = "нет доступа"
+USER_NOT_FOUND = "⚠️ Не удалось определить пользователя. Используйте id или @username из базы."
 
 START_TEXT = (
     f"🤖 {APP_NAME}\n"
-    "Выберите действие в меню ниже."
-)
-
-MEMBER_HELP = (
-    "📌 Команды участника:\n"
-    "/mynorm — моя норма за неделю\n"
-    "/myrest — мой рест\n"
-    "/mywarns — мои варны"
+    "Через кнопки ниже можно посмотреть свою норму, рест, варны и отправить жалобу."
 )
 
 ADMIN_HELP = (
-    "🛠 Команды админа (в ЛС):\n"
+    "Команды админа (ЛС):\n"
     "/norm_stats\n"
     "/set_norm <число>\n"
     "/cleanup_off | /cleanup_on | /cleanup_skip_once\n"
@@ -43,15 +24,28 @@ ADMIN_HELP = (
     "/unwarn <warn_id>\n"
     "/warns_all\n"
     "/warns_user <user>\n"
+    "/complaints\n"
+    "/del_complaint <id> (владелец)\n"
     "/kick <user> [причина]\n"
     "/ban <user> [причина]\n"
     "/unban <user>\n"
     "/mute <user> <минут> [причина]\n"
     "/unmute <user>\n"
-    "/role <user> <подпись>\n"
-    "/unrole <user>\n"
+    "+роль @username роль\n"
+    "-роль @username\n"
+    "Команды в группе: варн/мут/бан/кик @username ...\n"
     "Только владелец: /add_admin, /del_admin, /say, /set_group_id, /show_config, /set_param"
 )
+
+
+def format_user(username: Optional[str], display_name: str) -> str:
+    return f"@{username}" if username else display_name
+
+
+def week_period(now: datetime) -> str:
+    monday = now.date() - timedelta(days=now.weekday())
+    sunday = monday + timedelta(days=6)
+    return f"{monday.isoformat()} - {sunday.isoformat()}"
 
 
 def norm_status_text(username: Optional[str], display_name: str, count: int, norm: int) -> str:

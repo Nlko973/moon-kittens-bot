@@ -1,22 +1,51 @@
 ﻿import re
 from datetime import datetime, time
 
-from aiogram import Router
+from aiogram import F, Router
+from aiogram.enums import ChatType
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import Command, CommandObject
 from aiogram.types import Message
 
 from app.runtime import bot
+from app.keyboards import (
+    BTN_ADM_ADMINS,
+    BTN_ADM_CLEANUP_OFF,
+    BTN_ADM_CLEANUP_ON,
+    BTN_ADM_CLEANUP_SKIP,
+    BTN_ADM_COMPLAINTS,
+    BTN_ADM_COMPLAINT_DEL,
+    BTN_ADM_NORM_STATS,
+    BTN_ADM_PROMPT_BAN,
+    BTN_ADM_PROMPT_KICK,
+    BTN_ADM_PROMPT_MUTE,
+    BTN_ADM_PROMPT_REST,
+    BTN_ADM_PROMPT_SAY,
+    BTN_ADM_PROMPT_SET_PARAM,
+    BTN_ADM_PROMPT_UNBAN,
+    BTN_ADM_PROMPT_UNMUTE,
+    BTN_ADM_PROMPT_UNREST,
+    BTN_ADM_PROMPT_UNWARN,
+    BTN_ADM_PROMPT_WARN,
+    BTN_ADM_RESTS,
+    BTN_ADM_ROLE_DEL,
+    BTN_ADM_ROLE_SET,
+    BTN_ADM_SHOW_CONFIG,
+    BTN_ADM_WARNS_ALL,
+)
 from app.services.access import require_owner, require_private_admin
 from app.services.bot_config import PARAM_DEFAULTS, get_all_params, set_int_param
 from app.services.chat_settings import get_group_id, set_group_id
 from app.services.moderation import issue_warn, mute_user, unmute_user
+from app.services.roles import apply_role_signature, remove_role_signature
 from app.services.targets import parse_target
 from app.texts import USER_NOT_FOUND, format_user, week_period
 from config import OWNER_ID
 from db import (
     add_admin,
+    delete_complaint,
     get_admins,
+    get_all_complaints,
     get_all_rests,
     get_all_warns,
     get_all_week_stats,
@@ -241,6 +270,35 @@ async def cmd_warns_user(message: Message, command: CommandObject):
     await message.answer("\n".join(lines))
 
 
+@router.message(Command("complaints"))
+async def cmd_complaints(message: Message):
+    if not await require_private_admin(message):
+        return
+    rows = get_all_complaints()
+    if not rows:
+        await message.answer("Жалоб нет.")
+        return
+    lines = ["Жалобы:"]
+    for row in rows[:200]:
+        author = f"{format_user(row['username'], row['display_name'])} ({row['user_id']})"
+        lines.append(f"#{row['id']} {row['created_at']} {author}: {row['text']}")
+    await message.answer("\n".join(lines))
+
+
+@router.message(Command("del_complaint"))
+async def cmd_del_complaint(message: Message, command: CommandObject):
+    if not await require_owner(message):
+        return
+    if not command.args or not command.args.strip().isdigit():
+        await message.answer("Формат: /del_complaint <id>")
+        return
+    complaint_id = int(command.args.strip())
+    if delete_complaint(complaint_id):
+        await message.answer("✅ Жалоба удалена.")
+    else:
+        await message.answer("⚠️ Жалоба с таким номером не найдена.")
+
+
 @router.message(Command("kick"))
 async def cmd_kick(message: Message, command: CommandObject):
     if not await require_private_admin(message):
@@ -353,28 +411,7 @@ async def cmd_role(message: Message, command: CommandObject):
         await message.answer(USER_NOT_FOUND)
         return
 
-    group_id = get_group_id()
-    try:
-        await bot.promote_chat_member(
-            group_id,
-            user_id,
-            can_change_info=False,
-            can_delete_messages=False,
-            can_invite_users=False,
-            can_restrict_members=False,
-            can_pin_messages=False,
-            can_promote_members=False,
-            can_manage_video_chats=False,
-            can_manage_chat=False,
-            can_post_stories=False,
-            can_edit_stories=False,
-            can_delete_stories=False,
-            is_anonymous=False,
-        )
-        await bot.set_chat_administrator_custom_title(group_id, user_id, parts[1].strip())
-        await message.answer("✅ Подпись роли установлена.")
-    except TelegramBadRequest as exc:
-        await message.answer(f"⚠️ Не удалось установить подпись: {exc.message}")
+    await message.answer(await apply_role_signature(user_id, parts[1].strip()))
 
 
 @router.message(Command("unrole"))
@@ -388,26 +425,7 @@ async def cmd_unrole(message: Message, command: CommandObject):
     if not user_id:
         await message.answer(USER_NOT_FOUND)
         return
-    try:
-        await bot.promote_chat_member(
-            get_group_id(),
-            user_id,
-            can_change_info=False,
-            can_delete_messages=False,
-            can_invite_users=False,
-            can_restrict_members=False,
-            can_pin_messages=False,
-            can_promote_members=False,
-            can_manage_video_chats=False,
-            can_manage_chat=False,
-            can_post_stories=False,
-            can_edit_stories=False,
-            can_delete_stories=False,
-            is_anonymous=False,
-        )
-        await message.answer("✅ Роль снята.")
-    except TelegramBadRequest as exc:
-        await message.answer(f"⚠️ Не удалось снять роль: {exc.message}")
+    await message.answer(await remove_role_signature(user_id))
 
 
 @router.message(Command("add_admin"))
@@ -542,3 +560,178 @@ async def cmd_set_param(message: Message, command: CommandObject):
 
     set_int_param(name, value)
     await message.answer(f"✅ Параметр обновлен: {name}={value}")
+
+
+@router.message(F.chat.type == ChatType.PRIVATE, F.text.regexp(r"^\+роль\s+.+$"))
+async def private_role_plus(message: Message):
+    if not await require_private_admin(message):
+        return
+    match = re.match(r"^\+роль\s+(@\w+|-?\d+)\s+(.+)$", message.text.strip(), flags=re.IGNORECASE)
+    if not match:
+        await message.answer("Формат: +роль @username роль")
+        return
+    user_id = parse_target(match.group(1).strip())
+    if not user_id:
+        await message.answer(USER_NOT_FOUND)
+        return
+    title = match.group(2).strip()
+    await message.answer(await apply_role_signature(user_id, title))
+
+
+@router.message(F.chat.type == ChatType.PRIVATE, F.text.regexp(r"^-роль\s+.+$"))
+async def private_role_minus(message: Message):
+    if not await require_private_admin(message):
+        return
+    match = re.match(r"^-роль\s+(@\w+|-?\d+)$", message.text.strip(), flags=re.IGNORECASE)
+    if not match:
+        await message.answer("Формат: -роль @username")
+        return
+    user_id = parse_target(match.group(1).strip())
+    if not user_id:
+        await message.answer(USER_NOT_FOUND)
+        return
+    await message.answer(await remove_role_signature(user_id))
+
+
+@router.message(F.chat.type == ChatType.PRIVATE, F.text == BTN_ADM_NORM_STATS)
+async def btn_norm_stats(message: Message):
+    await cmd_norm_stats(message)
+
+
+@router.message(F.chat.type == ChatType.PRIVATE, F.text == BTN_ADM_RESTS)
+async def btn_rests(message: Message):
+    await cmd_rests(message)
+
+
+@router.message(F.chat.type == ChatType.PRIVATE, F.text == BTN_ADM_WARNS_ALL)
+async def btn_warns_all(message: Message):
+    await cmd_warns_all(message)
+
+
+@router.message(F.chat.type == ChatType.PRIVATE, F.text == BTN_ADM_ADMINS)
+async def btn_admins(message: Message):
+    await cmd_admins(message)
+
+
+@router.message(F.chat.type == ChatType.PRIVATE, F.text == BTN_ADM_COMPLAINTS)
+async def btn_complaints(message: Message):
+    await cmd_complaints(message)
+
+
+@router.message(F.chat.type == ChatType.PRIVATE, F.text == BTN_ADM_COMPLAINT_DEL)
+async def btn_complaints_del(message: Message):
+    if not await require_owner(message):
+        return
+    await message.answer("Формат: /del_complaint <id>")
+
+
+@router.message(F.chat.type == ChatType.PRIVATE, F.text == BTN_ADM_SHOW_CONFIG)
+async def btn_show_config(message: Message):
+    await cmd_show_config(message)
+
+
+@router.message(F.chat.type == ChatType.PRIVATE, F.text == BTN_ADM_CLEANUP_ON)
+async def btn_cleanup_on(message: Message):
+    await cmd_cleanup_on(message)
+
+
+@router.message(F.chat.type == ChatType.PRIVATE, F.text == BTN_ADM_CLEANUP_OFF)
+async def btn_cleanup_off(message: Message):
+    await cmd_cleanup_off(message)
+
+
+@router.message(F.chat.type == ChatType.PRIVATE, F.text == BTN_ADM_CLEANUP_SKIP)
+async def btn_cleanup_skip(message: Message):
+    await cmd_cleanup_skip_once(message)
+
+
+@router.message(F.chat.type == ChatType.PRIVATE, F.text == BTN_ADM_ROLE_SET)
+async def btn_role_set(message: Message):
+    if not await require_private_admin(message):
+        return
+    await message.answer("Формат: +роль @username роль")
+
+
+@router.message(F.chat.type == ChatType.PRIVATE, F.text == BTN_ADM_ROLE_DEL)
+async def btn_role_del(message: Message):
+    if not await require_private_admin(message):
+        return
+    await message.answer("Формат: -роль @username")
+
+
+@router.message(F.chat.type == ChatType.PRIVATE, F.text == BTN_ADM_PROMPT_WARN)
+async def btn_prompt_warn(message: Message):
+    if not await require_private_admin(message):
+        return
+    await message.answer("Формат: /warn <user_id|@username> <причина>")
+
+
+@router.message(F.chat.type == ChatType.PRIVATE, F.text == BTN_ADM_PROMPT_UNWARN)
+async def btn_prompt_unwarn(message: Message):
+    if not await require_private_admin(message):
+        return
+    await message.answer("Формат: /unwarn <warn_id>")
+
+
+@router.message(F.chat.type == ChatType.PRIVATE, F.text == BTN_ADM_PROMPT_REST)
+async def btn_prompt_rest(message: Message):
+    if not await require_private_admin(message):
+        return
+    await message.answer("Формат: /rest_add <user_id|@username> <дней|0|YYYY-MM-DD> <роль>")
+
+
+@router.message(F.chat.type == ChatType.PRIVATE, F.text == BTN_ADM_PROMPT_UNREST)
+async def btn_prompt_unrest(message: Message):
+    if not await require_private_admin(message):
+        return
+    await message.answer("Формат: /rest_del <user_id|@username>")
+
+
+@router.message(F.chat.type == ChatType.PRIVATE, F.text == BTN_ADM_PROMPT_MUTE)
+async def btn_prompt_mute(message: Message):
+    if not await require_private_admin(message):
+        return
+    await message.answer("Формат: /mute <user_id|@username> <минут> [причина]")
+
+
+@router.message(F.chat.type == ChatType.PRIVATE, F.text == BTN_ADM_PROMPT_UNMUTE)
+async def btn_prompt_unmute(message: Message):
+    if not await require_private_admin(message):
+        return
+    await message.answer("Формат: /unmute <user_id|@username>")
+
+
+@router.message(F.chat.type == ChatType.PRIVATE, F.text == BTN_ADM_PROMPT_BAN)
+async def btn_prompt_ban(message: Message):
+    if not await require_private_admin(message):
+        return
+    await message.answer("Формат: /ban <user_id|@username> [причина]")
+
+
+@router.message(F.chat.type == ChatType.PRIVATE, F.text == BTN_ADM_PROMPT_UNBAN)
+async def btn_prompt_unban(message: Message):
+    if not await require_private_admin(message):
+        return
+    await message.answer("Формат: /unban <user_id|@username>")
+
+
+@router.message(F.chat.type == ChatType.PRIVATE, F.text == BTN_ADM_PROMPT_KICK)
+async def btn_prompt_kick(message: Message):
+    if not await require_private_admin(message):
+        return
+    await message.answer("Формат: /kick <user_id|@username> [причина]")
+
+
+@router.message(F.chat.type == ChatType.PRIVATE, F.text == BTN_ADM_PROMPT_SAY)
+async def btn_prompt_say(message: Message):
+    if not await require_owner(message):
+        return
+    await message.answer("Формат: /say <текст>")
+
+
+@router.message(F.chat.type == ChatType.PRIVATE, F.text == BTN_ADM_PROMPT_SET_PARAM)
+async def btn_prompt_set_param(message: Message):
+    if not await require_owner(message):
+        return
+    names = ", ".join(PARAM_DEFAULTS.keys())
+    await message.answer(f"Формат: /set_param <name> <value>\nДоступные name: {names}")

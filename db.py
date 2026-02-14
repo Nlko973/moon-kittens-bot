@@ -125,6 +125,19 @@ def init_db():
         """
     )
 
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS complaints (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            username TEXT,
+            display_name TEXT,
+            text TEXT NOT NULL,
+            created_at TEXT
+        )
+        """
+    )
+
     # Migration from old schema
     _ensure_column(cur, "users", "inactive_notice_at", "TEXT")
     _ensure_column(cur, "users", "inactive_warned_at", "TEXT")
@@ -673,3 +686,63 @@ def get_expired_mutes(now: Optional[datetime] = None):
     rows = cur.fetchall()
     conn.close()
     return rows
+
+
+# complaints
+
+def create_complaint(user_id: int, username: Optional[str], display_name: str, text: str) -> int:
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        INSERT INTO complaints (user_id, username, display_name, text, created_at)
+        VALUES (?, ?, ?, ?, ?)
+        """,
+        (user_id, username, display_name, text, now_iso()),
+    )
+    complaint_id = cur.lastrowid
+    conn.commit()
+    conn.close()
+    return int(complaint_id)
+
+
+def get_user_complaints(user_id: int):
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT id, user_id, username, display_name, text, created_at
+        FROM complaints
+        WHERE user_id = ?
+        ORDER BY id DESC
+        """,
+        (user_id,),
+    )
+    rows = cur.fetchall()
+    conn.close()
+    return rows
+
+
+def get_all_complaints():
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT id, user_id, username, display_name, text, created_at
+        FROM complaints
+        ORDER BY id DESC
+        """
+    )
+    rows = cur.fetchall()
+    conn.close()
+    return rows
+
+
+def delete_complaint(complaint_id: int) -> bool:
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("DELETE FROM complaints WHERE id = ?", (complaint_id,))
+    changed = cur.rowcount
+    conn.commit()
+    conn.close()
+    return changed > 0

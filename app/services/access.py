@@ -1,8 +1,11 @@
-from aiogram.enums import ChatType
+﻿from aiogram.enums import ChatType
 from aiogram.types import Message
 
 from config import OWNER_ID
 from db import is_admin
+
+
+DENIED_TEXT = "нет доступа"
 
 
 def is_private(message: Message) -> bool:
@@ -17,6 +20,7 @@ async def require_private_admin(message: Message) -> bool:
     if not is_private(message):
         return False
     if not is_bot_admin(message.from_user.id):
+        await message.answer(DENIED_TEXT)
         return False
     return True
 
@@ -25,5 +29,6 @@ async def require_owner(message: Message) -> bool:
     if not is_private(message):
         return False
     if message.from_user.id != OWNER_ID:
+        await message.answer(DENIED_TEXT)
         return False
     return True
