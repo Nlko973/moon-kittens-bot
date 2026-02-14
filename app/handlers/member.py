@@ -33,7 +33,7 @@ async def complaint_start(message: Message):
     await message.answer("Опишите жалобу одним сообщением. Отправьте текст следующим сообщением.")
 
 
-@router.message(F.chat.type == ChatType.PRIVATE, F.from_user.is_not(None), F.text)
+@router.message(F.chat.type == ChatType.PRIVATE, F.from_user.is_not(None), F.text, F.from_user.func(lambda u: u and u.id in AWAITING_COMPLAINT_USERS))
 async def complaint_receive(message: Message):
     if message.from_user.id not in AWAITING_COMPLAINT_USERS:
         return
@@ -114,3 +114,4 @@ async def my_complaints(message: Message):
     for row in rows[:20]:
         lines.append(f"#{row['id']} {row['created_at']}: {row['text']}")
     await message.answer("\n".join(lines))
+
