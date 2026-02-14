@@ -43,6 +43,7 @@ from app.keyboards import (
 from app.services.access import require_owner, require_private_admin
 from app.services.bot_config import PARAM_DEFAULTS, get_all_params, set_int_param
 from app.services.chat_settings import get_group_id, set_group_id
+from app.services.duration_parser import parse_ru_duration_to_minutes
 from app.services.moderation import issue_warn, mute_user, unmute_user
 from app.services.roles import apply_role_signature, remove_role_signature
 from app.services.targets import parse_target
@@ -64,6 +65,7 @@ from db import (
     remove_admin,
     remove_rest,
     remove_warn,
+    remove_latest_warn_by_user,
     set_cleanup_enabled,
     set_cleanup_skip_once,
     set_tg_links_block_enabled,
@@ -93,7 +95,7 @@ def _cleanup_status_text() -> str:
     if not enabled:
         return f"{base} (авточистка отключена)"
     if skip_once:
-        return f"{base} (следующая будет пропущена)"
+        return f"{base} (текущая будет пропущена)"
     return f"{base} (включена)"
 
 
@@ -155,7 +157,7 @@ async def cmd_cleanup_skip_once(message: Message):
     if not await require_private_admin(message):
         return
     set_cleanup_skip_once(True)
-    await message.answer("✅ Следующая чистка будет пропущена.")
+    await message.answer("✅ Текущая чистка будет пропущена.")
 
 
 @router.message(Command("cleanup_when"))
@@ -281,22 +283,39 @@ async def cmd_warn(message: Message, command: CommandObject):
         await message.answer(USER_NOT_FOUND)
         return
 
-    warn_id, total, third = await issue_warn(user_id, message.from_user.id, parts[1].strip(), "manual")
+    warn_id, total, third, expires_at = await issue_warn(user_id, message.from_user.id, parts[1].strip(), "manual")
+    expires_text = datetime.fromisoformat(expires_at).strftime("%Y-%m-%d %H:%M:%S")
     suffix = " Пользователь автоматически получил мут (3-й варн)." if third else ""
-    await message.answer(f"✅ Варн выдан: #{warn_id}. Активных варнов: {total}.{suffix}")
+    await message.answer(f"✅ Варн выдан: #{warn_id}. Активных варнов: {total}. Срок до: {expires_text}.{suffix}")
 
 
 @router.message(Command("unwarn"))
 async def cmd_unwarn(message: Message, command: CommandObject):
     if not await require_private_admin(message):
         return
-    if not command.args or not command.args.strip().isdigit():
-        await message.answer("Формат: /unwarn <warn_id>")
+    if not command.args:
+        await message.answer("Формат: /unwarn <warn_id|user_id|@username>")
         return
-    if remove_warn(int(command.args.strip())):
-        await message.answer("✅ Варн снят.")
-    else:
-        await message.answer("⚠️ Активный варн с таким ID не найден.")
+
+    raw = command.args.strip()
+    if raw.isdigit():
+        if remove_warn(int(raw)):
+            await message.answer("✅ Варн снят.")
+        else:
+            await message.answer("⚠️ Активный варн с таким ID не найден.")
+        return
+
+    user_id = parse_target(raw)
+    if not user_id:
+        await message.answer(USER_NOT_FOUND)
+        return
+
+    removed_warn_id = remove_latest_warn_by_user(user_id)
+    if removed_warn_id is None:
+        await message.answer("⚠️ У пользователя нет активных варнов.")
+        return
+
+    await message.answer(f"✅ Снят последний активный варн пользователя: #{removed_warn_id}.")
 
 
 @router.message(Command("warns_all"))
@@ -378,7 +397,7 @@ async def cmd_kick(message: Message, command: CommandObject):
     if not user_id:
         await message.answer(USER_NOT_FOUND)
         return
-    reason = parts[1] if len(parts) > 1 else "Без причины"
+    reason = parts[1] if len(parts) > 1 else "No reason"
     try:
         group_id = get_group_id()
         await bot.ban_chat_member(group_id, user_id)
@@ -386,6 +405,8 @@ async def cmd_kick(message: Message, command: CommandObject):
         await message.answer(f"✅ Пользователь кикнут. Причина: {reason}.")
     except TelegramBadRequest as exc:
         await message.answer(f"⚠️ Не удалось кикнуть пользователя: {exc.message}")
+    except Exception as exc:
+        await message.answer(f"⚠️ Ошибка кика: {exc}")
 
 
 @router.message(Command("ban"))
@@ -400,12 +421,14 @@ async def cmd_ban(message: Message, command: CommandObject):
     if not user_id:
         await message.answer(USER_NOT_FOUND)
         return
-    reason = parts[1] if len(parts) > 1 else "Без причины"
+    reason = parts[1] if len(parts) > 1 else "No reason"
     try:
         await bot.ban_chat_member(get_group_id(), user_id)
         await message.answer(f"✅ Пользователь забанен. Причина: {reason}.")
     except TelegramBadRequest as exc:
         await message.answer(f"⚠️ Не удалось забанить пользователя: {exc.message}")
+    except Exception as exc:
+        await message.answer(f"⚠️ Ошибка бана: {exc}")
 
 
 @router.message(Command("unban"))
@@ -424,6 +447,8 @@ async def cmd_unban(message: Message, command: CommandObject):
         await message.answer("✅ Пользователь разбанен.")
     except TelegramBadRequest as exc:
         await message.answer(f"⚠️ Не удалось разбанить пользователя: {exc.message}")
+    except Exception as exc:
+        await message.answer(f"⚠️ Ошибка разбана: {exc}")
 
 
 @router.message(Command("mute"))
@@ -431,21 +456,43 @@ async def cmd_mute(message: Message, command: CommandObject):
     if not await require_private_admin(message):
         return
     if not command.args:
-        await message.answer("Формат: /mute <user_id|@username> <минут> [причина]")
+        await message.answer("Формат: /mute <user_id|@username> <минуты|5 минут|2 часа|1 день> [причина]")
         return
-    parts = command.args.split(maxsplit=2)
+    parts = command.args.split(maxsplit=1)
     if len(parts) < 2:
-        await message.answer("Формат: /mute <user_id|@username> <минут> [причина]")
+        await message.answer("Формат: /mute <user_id|@username> <минуты|5 минут|2 часа|1 день> [причина]")
         return
-    user_id = parse_target(parts[0])
+    user_id = parse_target(parts[0].strip())
     if not user_id:
         await message.answer(USER_NOT_FOUND)
         return
-    if not parts[1].isdigit() or int(parts[1]) <= 0:
-        await message.answer("⚠️ Время мута должно быть положительным числом.")
+
+    rest = parts[1].strip()
+    minutes = None
+    reason = "Без причины"
+
+    simple = rest.split(maxsplit=1)
+    if simple and simple[0].isdigit():
+        minutes = int(simple[0])
+        if len(simple) > 1:
+            reason = simple[1].strip()
+    else:
+        match = re.match(r"^(?P<num>\d+)\s*(?P<unit>\S+)(?:\s+(?P<reason>.*))?$", rest)
+        if match:
+            duration_raw = f"{match.group('num')} {match.group('unit')}"
+            minutes = parse_ru_duration_to_minutes(duration_raw)
+            parsed_reason = (match.group("reason") or "").strip()
+            if parsed_reason:
+                reason = parsed_reason
+
+    if not minutes or minutes <= 0:
+        await message.answer("⚠️ Не удалось распознать время мута. Пример: /mute @user 5 минут флуд")
         return
-    reason = parts[2] if len(parts) > 2 else "Без причины"
-    await message.answer(await mute_user(user_id, int(parts[1]), message.from_user.id, reason))
+
+    try:
+        await message.answer(await mute_user(user_id, int(minutes), message.from_user.id, reason))
+    except Exception as exc:
+        await message.answer(f"⚠️ Ошибка мута: {exc}")
 
 
 @router.message(Command("unmute"))
@@ -816,7 +863,7 @@ async def btn_prompt_warn(message: Message):
 async def btn_prompt_unwarn(message: Message):
     if not await require_private_admin(message):
         return
-    await message.answer("Формат: /unwarn <warn_id>")
+    await message.answer("Формат: /unwarn <warn_id|user_id|@username>")
 
 
 @router.message(F.chat.type == ChatType.PRIVATE, F.text == BTN_ADM_PROMPT_REST)

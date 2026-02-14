@@ -142,6 +142,7 @@ def init_db():
     _ensure_column(cur, "users", "inactive_notice_at", "TEXT")
     _ensure_column(cur, "users", "inactive_warned_at", "TEXT")
     _ensure_column(cur, "users", "first_seen_at", "TEXT")
+    _ensure_column(cur, "warns", "expires_at", "TEXT")
 
     if get_setting("weekly_norm", cur) is None:
         set_setting("weekly_norm", str(WEEKLY_NORM_DEFAULT), cur)
@@ -547,20 +548,29 @@ def _expire_old_rests():
 
 # warns
 
-def create_warn(user_id: int, admin_id: int, reason: str, warn_type: str = "manual") -> int:
+def create_warn(
+    user_id: int,
+    admin_id: int,
+    reason: str,
+    warn_type: str = "manual",
+    duration_days: int = 30,
+) -> tuple[int, str]:
+    expires_at = (datetime.now() + timedelta(days=duration_days)).isoformat(timespec="seconds")
     conn = get_conn()
     cur = conn.cursor()
     cur.execute(
-        "INSERT INTO warns (user_id, admin_id, reason, warn_type, created_at, active) VALUES (?, ?, ?, ?, ?, 1)",
-        (user_id, admin_id, reason, warn_type, now_iso()),
+        "INSERT INTO warns (user_id, admin_id, reason, warn_type, created_at, expires_at, active) "
+        "VALUES (?, ?, ?, ?, ?, ?, 1)",
+        (user_id, admin_id, reason, warn_type, now_iso(), expires_at),
     )
     warn_id = cur.lastrowid
     conn.commit()
     conn.close()
-    return int(warn_id)
+    return int(warn_id), expires_at
 
 
 def remove_warn(warn_id: int) -> bool:
+    _expire_old_warns()
     conn = get_conn()
     cur = conn.cursor()
     cur.execute("UPDATE warns SET active = 0 WHERE id = ? AND active = 1", (warn_id,))
@@ -570,10 +580,33 @@ def remove_warn(warn_id: int) -> bool:
     return changed > 0
 
 
-def get_user_warns(user_id: int, active_only: bool = True):
+def remove_latest_warn_by_user(user_id: int) -> Optional[int]:
+    _expire_old_warns()
     conn = get_conn()
     cur = conn.cursor()
-    query = "SELECT id, user_id, admin_id, reason, warn_type, created_at, active FROM warns WHERE user_id = ?"
+    cur.execute(
+        "SELECT id FROM warns WHERE user_id = ? AND active = 1 ORDER BY id DESC LIMIT 1",
+        (user_id,),
+    )
+    row = cur.fetchone()
+    if not row:
+        conn.close()
+        return None
+    warn_id = int(row["id"])
+    cur.execute("UPDATE warns SET active = 0 WHERE id = ?", (warn_id,))
+    conn.commit()
+    conn.close()
+    return warn_id
+
+
+def get_user_warns(user_id: int, active_only: bool = True):
+    _expire_old_warns()
+    conn = get_conn()
+    cur = conn.cursor()
+    query = (
+        "SELECT id, user_id, admin_id, reason, warn_type, created_at, expires_at, active "
+        "FROM warns WHERE user_id = ?"
+    )
     params = [user_id]
     if active_only:
         query += " AND active = 1"
@@ -585,10 +618,11 @@ def get_user_warns(user_id: int, active_only: bool = True):
 
 
 def get_all_warns(active_only: bool = True):
+    _expire_old_warns()
     conn = get_conn()
     cur = conn.cursor()
     query = (
-        "SELECT w.id, w.user_id, w.admin_id, w.reason, w.warn_type, w.created_at, w.active, "
+        "SELECT w.id, w.user_id, w.admin_id, w.reason, w.warn_type, w.created_at, w.expires_at, w.active, "
         "u.username, u.display_name "
         "FROM warns w "
         "LEFT JOIN users u ON u.user_id = w.user_id"
@@ -603,12 +637,25 @@ def get_all_warns(active_only: bool = True):
 
 
 def get_active_warn_count(user_id: int) -> int:
+    _expire_old_warns()
     conn = get_conn()
     cur = conn.cursor()
     cur.execute("SELECT COUNT(*) AS c FROM warns WHERE user_id = ? AND active = 1", (user_id,))
     c = cur.fetchone()["c"]
     conn.close()
     return int(c)
+
+
+def _expire_old_warns():
+    conn = get_conn()
+    cur = conn.cursor()
+    now = now_iso()
+    cur.execute(
+        "UPDATE warns SET active = 0 WHERE active = 1 AND expires_at IS NOT NULL AND expires_at <= ?",
+        (now,),
+    )
+    conn.commit()
+    conn.close()
 
 
 # inactivity

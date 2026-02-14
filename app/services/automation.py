@@ -135,7 +135,7 @@ async def run_week_cleanup():
     for row in rows:
         if row["count"] >= norm:
             continue
-        warn_id, _total, _third = await issue_warn(row["user_id"], 0, "Нет недельной нормы", "norma")
+        warn_id, _total, _third, _expires_at = await issue_warn(row["user_id"], 0, "Нет недельной нормы", "norma")
         punished.append((row, warn_id))
 
     if punished:
@@ -171,7 +171,7 @@ async def run_inactivity_checks():
     for row in to_warn:
         if row["inactive_warned_at"]:
             continue
-        warn_id, _total, _third = await issue_warn(row["user_id"], 0, "Неактив 10 дней", "inactive")
+        warn_id, _total, _third, _expires_at = await issue_warn(row["user_id"], 0, "Неактив 10 дней", "inactive")
         mark_inactive_warned(row["user_id"])
         user_tag = format_user(row["username"], row["display_name"])
         await bot.send_message(group_id, f"⚠️ {user_tag} — выдан варн за неактив (#{warn_id}).")

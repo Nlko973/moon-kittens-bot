@@ -133,9 +133,10 @@ async def cmd_warn_word(message: Message):
         await message.answer("⚠️ Пользователь не найден в базе.")
         return
     reason = (match.group(2) or "Без причины").strip()
-    warn_id, total, third = await issue_warn(user_id, message.from_user.id, reason, "manual")
+    warn_id, total, third, expires_at = await issue_warn(user_id, message.from_user.id, reason, "manual")
+    expires_text = expires_at.replace("T", " ")
     suffix = " Пользователь автоматически получил мут (3-й варн)." if third else ""
-    await message.answer(f"✅ Варн выдан: #{warn_id}. Активных варнов: {total}.{suffix}")
+    await message.answer(f"✅ Варн выдан: #{warn_id}. Активных варнов: {total}. Срок до: {expires_text}.{suffix}")
 
 
 @router.message(F.text.regexp(r"^мут\s+.+$"))
@@ -157,7 +158,10 @@ async def cmd_mute_word(message: Message):
     if minutes is None:
         await message.answer("⚠️ Примеры: мут @user 5 минут | мут @user 2 часа | мут @user 1 день")
         return
-    await message.answer(await mute_user(user_id, minutes, message.from_user.id, "Мут в чате"))
+    try:
+        await message.answer(await mute_user(user_id, minutes, message.from_user.id, "Мут в чате"))
+    except Exception as exc:
+        await message.answer(f"⚠️ Ошибка мута: {exc}")
 
 
 @router.message(F.text.regexp(r"^бан\s+.+$"))
@@ -179,6 +183,8 @@ async def cmd_ban_word(message: Message):
         await message.answer("✅ Пользователь забанен.")
     except TelegramBadRequest as exc:
         await message.answer(f"⚠️ Не удалось забанить пользователя: {exc.message}")
+    except Exception as exc:
+        await message.answer(f"⚠️ Ошибка бана: {exc}")
 
 
 @router.message(F.text.regexp(r"^кик\s+.+$"))
@@ -202,6 +208,8 @@ async def cmd_kick_word(message: Message):
         await message.answer("✅ Пользователь кикнут.")
     except TelegramBadRequest as exc:
         await message.answer(f"⚠️ Не удалось кикнуть пользователя: {exc.message}")
+    except Exception as exc:
+        await message.answer(f"⚠️ Ошибка кика: {exc}")
 
 
 @router.message(F.from_user.is_not(None), ~F.from_user.is_bot)
@@ -218,7 +226,7 @@ async def on_group_message(message: Message):
             except TelegramBadRequest:
                 pass
 
-            warn_id, total, _third = await issue_warn(
+            warn_id, total, _third, _expires_at = await issue_warn(
                 message.from_user.id,
                 0,
                 "Ссылка на Telegram-канал (запрещено)",

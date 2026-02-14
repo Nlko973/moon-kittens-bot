@@ -117,8 +117,8 @@ async def issue_warn(
     admin_id: int,
     reason: str,
     warn_type: str = "manual",
-) -> tuple[int, int, bool]:
-    warn_id = create_warn(user_id, admin_id, reason, warn_type)
+) -> tuple[int, int, bool, str]:
+    warn_id, expires_at = create_warn(user_id, admin_id, reason, warn_type, duration_days=30)
     total = get_active_warn_count(user_id)
     third_triggered = total == 3
 
@@ -136,4 +136,4 @@ async def issue_warn(
         except TelegramBadRequest:
             pass
 
-    return warn_id, total, third_triggered
+    return warn_id, total, third_triggered, expires_at
