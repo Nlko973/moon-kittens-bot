@@ -1,4 +1,4 @@
-from aiogram import Router
+﻿from aiogram import Router
 from aiogram.enums import ChatType
 from aiogram.types import Message
 

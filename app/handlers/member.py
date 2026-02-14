@@ -33,11 +33,12 @@ async def complaint_start(message: Message):
     await message.answer("Опишите жалобу одним сообщением. Отправьте текст следующим сообщением.")
 
 
-@router.message(F.chat.type == ChatType.PRIVATE, F.from_user.is_not(None), F.text)
+@router.message(
+    F.chat.type == ChatType.PRIVATE,
+    F.from_user.func(lambda user: user is not None and user.id in AWAITING_COMPLAINT_USERS),
+    F.text,
+)
 async def complaint_receive(message: Message):
-    if message.from_user.id not in AWAITING_COMPLAINT_USERS:
-        return
-
     text = message.text.strip()
     if not text:
         await message.answer("Текст жалобы пустой. Напишите жалобу сообщением.")
@@ -49,7 +50,7 @@ async def complaint_receive(message: Message):
 
 
 @router.message(F.text == BTN_MY_NORM)
-@router.message(F.text.regexp(r"^Моя норма$"))
+@router.message(F.text.regexp(r"(?i)^моя\s+норма$"))
 @router.message(Command("mynorm"))
 async def mynorm(message: Message):
     if not (_is_private(message) or _is_target_group(message)):
@@ -60,7 +61,7 @@ async def mynorm(message: Message):
 
 
 @router.message(F.text == BTN_MY_REST)
-@router.message(F.text.regexp(r"^Мой рест$"))
+@router.message(F.text.regexp(r"(?i)^мой\s+рест$"))
 @router.message(Command("myrest"))
 async def myrest(message: Message):
     if not (_is_private(message) or _is_target_group(message)):
@@ -82,7 +83,7 @@ async def myrest(message: Message):
 
 
 @router.message(F.text == BTN_MY_WARNS)
-@router.message(F.text.regexp(r"^Мои варны$"))
+@router.message(F.text.regexp(r"(?i)^мои\s+варны$"))
 @router.message(Command("mywarns"))
 async def mywarns(message: Message):
     if not (_is_private(message) or _is_target_group(message)):
