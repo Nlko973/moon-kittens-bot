@@ -22,6 +22,7 @@ async def cmd_start(message: Message):
 
 @router.message(Command("menu"))
 @router.message(F.text == BTN_MENU)
+@router.message(F.text.regexp(r"(?i)^(?:📋\s*)?меню$"))
 async def cmd_menu(message: Message):
     if not is_private(message):
         return
@@ -32,6 +33,7 @@ async def cmd_menu(message: Message):
 
 
 @router.message(F.text == BTN_ADMIN_PANEL)
+@router.message(F.text.regexp(r"(?i)^(?:🛠\s*)?(?:админ(?:\s*панель|[-\s]*команды)|команды\s*админа)$"))
 async def open_admin_panel(message: Message):
     if not await require_private_admin(message):
         return

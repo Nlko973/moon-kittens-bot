@@ -118,35 +118,6 @@ async def cmd_role_minus_group(message: Message):
     await message.answer(await remove_role_signature(user_id))
 
 
-@router.message(F.from_user.is_not(None), ~F.from_user.is_bot)
-async def on_group_message(message: Message):
-    if message.chat.type not in {ChatType.GROUP, ChatType.SUPERGROUP}:
-        return
-    if message.chat.id != get_group_id():
-        return
-
-    if is_tg_links_block_enabled() and not is_bot_admin(message.from_user.id):
-        if _message_has_tg_link(message):
-            try:
-                await bot.delete_message(message.chat.id, message.message_id)
-            except TelegramBadRequest:
-                pass
-
-            warn_id, total, _third = await issue_warn(
-                message.from_user.id,
-                0,
-                "Ссылка на Telegram-канал (запрещено)",
-                "tg_link",
-            )
-            await message.answer(f"⚠️ Ссылка запрещена. Выдан варн #{warn_id}. Активных варнов: {total}.")
-            return
-
-    try:
-        await add_message_and_guard(message)
-    except TelegramBadRequest:
-        pass
-
-
 @router.message(F.text.regexp(r"^варн\s+.+$"))
 async def cmd_warn_word(message: Message):
     if message.chat.type not in {ChatType.GROUP, ChatType.SUPERGROUP} or message.chat.id != get_group_id():
@@ -231,3 +202,32 @@ async def cmd_kick_word(message: Message):
         await message.answer("✅ Пользователь кикнут.")
     except TelegramBadRequest as exc:
         await message.answer(f"⚠️ Не удалось кикнуть пользователя: {exc.message}")
+
+
+@router.message(F.from_user.is_not(None), ~F.from_user.is_bot)
+async def on_group_message(message: Message):
+    if message.chat.type not in {ChatType.GROUP, ChatType.SUPERGROUP}:
+        return
+    if message.chat.id != get_group_id():
+        return
+
+    if is_tg_links_block_enabled() and not is_bot_admin(message.from_user.id):
+        if _message_has_tg_link(message):
+            try:
+                await bot.delete_message(message.chat.id, message.message_id)
+            except TelegramBadRequest:
+                pass
+
+            warn_id, total, _third = await issue_warn(
+                message.from_user.id,
+                0,
+                "Ссылка на Telegram-канал (запрещено)",
+                "tg_link",
+            )
+            await message.answer(f"⚠️ Ссылка запрещена. Выдан варн #{warn_id}. Активных варнов: {total}.")
+            return
+
+    try:
+        await add_message_and_guard(message)
+    except TelegramBadRequest:
+        pass
