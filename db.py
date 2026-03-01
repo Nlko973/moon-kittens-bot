@@ -412,6 +412,34 @@ def get_all_week_stats(week_start: Optional[str] = None, members_only: bool = Tr
     return rows
 
 
+def get_known_user_ids(limit: int = 1000, members_first: bool = True):
+    conn = get_conn()
+    cur = conn.cursor()
+    if members_first:
+        cur.execute(
+            """
+            SELECT user_id
+            FROM users
+            ORDER BY is_member DESC, COALESCE(updated_at, first_seen_at, '') DESC
+            LIMIT ?
+            """,
+            (limit,),
+        )
+    else:
+        cur.execute(
+            """
+            SELECT user_id
+            FROM users
+            ORDER BY COALESCE(updated_at, first_seen_at, '') DESC
+            LIMIT ?
+            """,
+            (limit,),
+        )
+    rows = cur.fetchall()
+    conn.close()
+    return [int(row["user_id"]) for row in rows]
+
+
 def get_user_brief(user_id: int):
     conn = get_conn()
     cur = conn.cursor()

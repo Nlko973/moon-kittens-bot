@@ -8,6 +8,7 @@ from aiogram.types import User
 from app.runtime import bot
 from app.services.chat_settings import get_group_id
 from app.texts import format_user
+from db import get_known_user_ids
 
 _USERNAME_TO_ID: dict[str, int] = {}
 
@@ -33,9 +34,36 @@ async def resolve_user_id_by_username(username: str) -> Optional[int]:
             _USERNAME_TO_ID[key] = int(chat.id)
             return int(chat.id)
     except TelegramBadRequest:
-        return None
+        pass
     except Exception:
-        return None
+        pass
+
+    # Fast fallback: scan current chat administrators by live username.
+    try:
+        admins = await bot.get_chat_administrators(get_group_id())
+        for admin in admins:
+            u = admin.user
+            remember_user(u)
+            if u and u.username and u.username.lower() == key:
+                _USERNAME_TO_ID[key] = int(u.id)
+                return int(u.id)
+    except Exception:
+        pass
+
+    # Deep fallback: resolve by known Telegram IDs from DB and live profile lookup.
+    # We only store IDs in DB, usernames are checked in real time.
+    for user_id in get_known_user_ids(limit=1200, members_first=True):
+        try:
+            member = await bot.get_chat_member(get_group_id(), int(user_id))
+            u = member.user
+            remember_user(u)
+            if u and u.username and u.username.lower() == key:
+                _USERNAME_TO_ID[key] = int(u.id)
+                return int(u.id)
+        except TelegramBadRequest:
+            continue
+        except Exception:
+            continue
     return None
 
 
