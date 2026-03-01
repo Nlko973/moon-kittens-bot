@@ -9,6 +9,7 @@ from aiogram.types import Message
 from app.runtime import bot
 from app.keyboards import (
     BTN_ADM_ADD_ADMIN,
+    BTN_ADM_COMPLAINT_DEL,
     BTN_ADM_DEL_ADMIN,
     BTN_ADM_PROMPT_BAN,
     BTN_ADM_PROMPT_KICK,
@@ -27,7 +28,7 @@ from app.services.duration_parser import parse_deadline, parse_ru_duration_to_mi
 from app.services.moderation import issue_warn, mute_user, unmute_user
 from app.services.targets import parse_target
 from app.texts import USER_NOT_FOUND
-from db import add_admin, extend_rest, remove_admin, remove_latest_warn_by_user, remove_rest, remove_warn, set_rest_until
+from db import add_admin, delete_complaint, extend_rest, remove_admin, remove_latest_warn_by_user, remove_rest, remove_warn, set_rest_until
 
 router = Router()
 
@@ -62,6 +63,7 @@ async def _start_admin_dialog(message: Message, command: str, owner_only: bool =
         "kick": "Команда: кик.\nУкажите пользователя (id или @username).\nДля отмены: стоп/отмена.",
         "add_admin": "Команда: добавить админа.\nУкажите пользователя (id или @username).\nДля отмены: стоп/отмена.",
         "del_admin": "Команда: удалить админа.\nУкажите пользователя (id или @username).\nДля отмены: стоп/отмена.",
+        "del_complaint": "Команда: удалить жалобу.\nУкажите номер жалобы (ID).\nДля отмены: стоп/отмена.",
         "say_any": (
             "Команда: написать в чат.\n"
             "Отправьте следующим сообщением текст, фото, видео, GIF, документ, аудио, голосовое, стикер.\n"
@@ -130,6 +132,11 @@ async def dialog_add_admin_start(message: Message):
 @router.message(F.chat.type == ChatType.PRIVATE, F.text.regexp(r"(?i)^/del_admin(?:@\w+)?\s*$"))
 async def dialog_del_admin_start(message: Message):
     await _start_admin_dialog(message, "del_admin", owner_only=True)
+
+
+@router.message(F.chat.type == ChatType.PRIVATE, F.text.regexp(r"(?i)^/del_complaint(?:@\w+)?\s*$"))
+async def dialog_del_complaint_start(message: Message):
+    await _start_admin_dialog(message, "del_complaint", owner_only=True)
 
 
 @router.message(F.chat.type == ChatType.PRIVATE, F.text.regexp(r"(?i)^/say(?:@\w+)?\s*$"))
@@ -212,6 +219,11 @@ async def btn_dialog_del_admin_start(message: Message):
     await _start_admin_dialog(message, "del_admin", owner_only=True)
 
 
+@router.message(F.chat.type == ChatType.PRIVATE, F.text == BTN_ADM_COMPLAINT_DEL)
+async def btn_dialog_del_complaint_start(message: Message):
+    await _start_admin_dialog(message, "del_complaint", owner_only=True)
+
+
 @router.message(
     F.chat.type == ChatType.PRIVATE,
     F.from_user.is_not(None),
@@ -260,6 +272,8 @@ async def dialog_input(message: Message):
         await _handle_add_admin_dialog(message, step, data, text)
     elif command == "del_admin":
         await _handle_del_admin_dialog(message, step, text)
+    elif command == "del_complaint":
+        await _handle_del_complaint_dialog(message, step, text)
     elif command == "say":
         await _handle_say_dialog(message, step, text)
     elif command == "say_any":
@@ -665,6 +679,23 @@ async def _handle_del_admin_dialog(message: Message, step: int, text: str):
     remove_admin(int(user_id))
     _stop_dialog(message.from_user.id)
     await message.answer("✅ Админ удален.")
+
+
+async def _handle_del_complaint_dialog(message: Message, step: int, text: str):
+    if step != 0:
+        _stop_dialog(message.from_user.id)
+        return
+    raw = text.strip()
+    if not raw.isdigit():
+        await message.answer("Укажите числовой ID жалобы.")
+        return
+    complaint_id = int(raw)
+    changed = delete_complaint(complaint_id)
+    _stop_dialog(message.from_user.id)
+    if changed:
+        await message.answer("✅ Жалоба помечена как неактивная.")
+    else:
+        await message.answer("⚠️ Активная жалоба с таким ID не найдена.")
 
 
 

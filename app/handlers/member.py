@@ -114,8 +114,8 @@ async def mywarns(message: Message):
         return
 
     lines = [f"⚠️ Ваши активные варны: {len(warns)}."]
-    for row in warns[:20]:
-        lines.append(f"#{row['id']} [{row['warn_type']}] {row['reason']}")
+    for idx, row in enumerate(warns[:20], start=1):
+        lines.append(f"{idx}. [{row['warn_type']}] {row['reason']}")
     await message.answer("\n".join(lines))
 
 
@@ -128,7 +128,7 @@ async def my_complaints(message: Message):
         return
 
     lines = ["Ваши жалобы:"]
-    for row in rows[:20]:
-        lines.append(f"#{row['id']} {row['created_at']}: {row['text']}")
+    for idx, row in enumerate(rows[:20], start=1):
+        lines.append(f"{idx}. {row['created_at']}: {row['text']}")
     await message.answer("\n".join(lines))
 
