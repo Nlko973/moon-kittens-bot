@@ -72,82 +72,82 @@ async def _start_admin_dialog(message: Message, command: str, owner_only: bool =
     return True
 
 
-@router.message(F.chat.type == ChatType.PRIVATE, F.text.regexp(r"(?i)^/warn(?:@\w+)?(?:\s+.*)?$"))
+@router.message(F.chat.type == ChatType.PRIVATE, F.text.regexp(r"(?i)^/warn(?:@\w+)?\s*$"))
 async def dialog_warn_start(message: Message):
     await _start_admin_dialog(message, "warn")
 
 
-@router.message(F.chat.type == ChatType.PRIVATE, F.text.regexp(r"(?i)^/rest_add(?:@\w+)?(?:\s+.*)?$"))
+@router.message(F.chat.type == ChatType.PRIVATE, F.text.regexp(r"(?i)^/rest_add(?:@\w+)?\s*$"))
 async def dialog_rest_add_start(message: Message):
     await _start_admin_dialog(message, "rest_add")
 
 
-@router.message(F.chat.type == ChatType.PRIVATE, F.text.regexp(r"(?i)^/rest_extend(?:@\w+)?(?:\s+.*)?$"))
+@router.message(F.chat.type == ChatType.PRIVATE, F.text.regexp(r"(?i)^/rest_extend(?:@\w+)?\s*$"))
 async def dialog_rest_extend_start(message: Message):
     await _start_admin_dialog(message, "rest_extend")
 
 
-@router.message(F.chat.type == ChatType.PRIVATE, F.text.regexp(r"(?i)^/rest_del(?:@\w+)?(?:\s+.*)?$"))
+@router.message(F.chat.type == ChatType.PRIVATE, F.text.regexp(r"(?i)^/rest_del(?:@\w+)?\s*$"))
 async def dialog_rest_del_start(message: Message):
     await _start_admin_dialog(message, "rest_del")
 
 
-@router.message(F.chat.type == ChatType.PRIVATE, F.text.regexp(r"(?i)^/mute(?:@\w+)?(?:\s+.*)?$"))
+@router.message(F.chat.type == ChatType.PRIVATE, F.text.regexp(r"(?i)^/mute(?:@\w+)?\s*$"))
 async def dialog_mute_start(message: Message):
     await _start_admin_dialog(message, "mute")
 
 
-@router.message(F.chat.type == ChatType.PRIVATE, F.text.regexp(r"(?i)^/unmute(?:@\w+)?(?:\s+.*)?$"))
+@router.message(F.chat.type == ChatType.PRIVATE, F.text.regexp(r"(?i)^/unmute(?:@\w+)?\s*$"))
 async def dialog_unmute_start(message: Message):
     await _start_admin_dialog(message, "unmute")
 
 
-@router.message(F.chat.type == ChatType.PRIVATE, F.text.regexp(r"(?i)^/ban(?:@\w+)?(?:\s+.*)?$"))
+@router.message(F.chat.type == ChatType.PRIVATE, F.text.regexp(r"(?i)^/ban(?:@\w+)?\s*$"))
 async def dialog_ban_start(message: Message):
     await _start_admin_dialog(message, "ban")
 
 
-@router.message(F.chat.type == ChatType.PRIVATE, F.text.regexp(r"(?i)^/kick(?:@\w+)?(?:\s+.*)?$"))
+@router.message(F.chat.type == ChatType.PRIVATE, F.text.regexp(r"(?i)^/kick(?:@\w+)?\s*$"))
 async def dialog_kick_start(message: Message):
     await _start_admin_dialog(message, "kick")
 
 
-@router.message(F.chat.type == ChatType.PRIVATE, F.text.regexp(r"(?i)^/unban(?:@\w+)?(?:\s+.*)?$"))
+@router.message(F.chat.type == ChatType.PRIVATE, F.text.regexp(r"(?i)^/unban(?:@\w+)?\s*$"))
 async def dialog_unban_start(message: Message):
     await _start_admin_dialog(message, "unban")
 
 
-@router.message(F.chat.type == ChatType.PRIVATE, F.text.regexp(r"(?i)^/unwarn(?:@\w+)?(?:\s+.*)?$"))
+@router.message(F.chat.type == ChatType.PRIVATE, F.text.regexp(r"(?i)^/unwarn(?:@\w+)?\s*$"))
 async def dialog_unwarn_start(message: Message):
     await _start_admin_dialog(message, "unwarn")
 
 
-@router.message(F.chat.type == ChatType.PRIVATE, F.text.regexp(r"(?i)^/add_admin(?:@\w+)?(?:\s+.*)?$"))
+@router.message(F.chat.type == ChatType.PRIVATE, F.text.regexp(r"(?i)^/add_admin(?:@\w+)?\s*$"))
 async def dialog_add_admin_start(message: Message):
     await _start_admin_dialog(message, "add_admin", owner_only=True)
 
 
-@router.message(F.chat.type == ChatType.PRIVATE, F.text.regexp(r"(?i)^/del_admin(?:@\w+)?(?:\s+.*)?$"))
+@router.message(F.chat.type == ChatType.PRIVATE, F.text.regexp(r"(?i)^/del_admin(?:@\w+)?\s*$"))
 async def dialog_del_admin_start(message: Message):
     await _start_admin_dialog(message, "del_admin", owner_only=True)
 
 
-@router.message(F.chat.type == ChatType.PRIVATE, F.text.regexp(r"(?i)^/say(?:@\w+)?(?:\s+.*)?$"))
+@router.message(F.chat.type == ChatType.PRIVATE, F.text.regexp(r"(?i)^/say(?:@\w+)?\s*$"))
 async def dialog_say_start(message: Message):
     await _start_admin_dialog(message, "say_any", owner_only=True)
 
 
-@router.message(F.chat.type == ChatType.PRIVATE, F.text.regexp(r"(?i)^/say_photo(?:@\w+)?(?:\s+.*)?$"))
+@router.message(F.chat.type == ChatType.PRIVATE, F.text.regexp(r"(?i)^/say_photo(?:@\w+)?\s*$"))
 async def dialog_say_photo_start(message: Message):
     await _start_admin_dialog(message, "say_any", owner_only=True)
 
 
-@router.message(F.chat.type == ChatType.PRIVATE, F.text.regexp(r"(?i)^/say_gif(?:@\w+)?(?:\s+.*)?$"))
+@router.message(F.chat.type == ChatType.PRIVATE, F.text.regexp(r"(?i)^/say_gif(?:@\w+)?\s*$"))
 async def dialog_say_gif_start(message: Message):
     await _start_admin_dialog(message, "say_any", owner_only=True)
 
 
-@router.message(F.chat.type == ChatType.PRIVATE, F.text.regexp(r"(?i)^/say_video(?:@\w+)?(?:\s+.*)?$"))
+@router.message(F.chat.type == ChatType.PRIVATE, F.text.regexp(r"(?i)^/say_video(?:@\w+)?\s*$"))
 async def dialog_say_video_start(message: Message):
     await _start_admin_dialog(message, "say_any", owner_only=True)
 
