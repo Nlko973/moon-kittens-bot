@@ -275,7 +275,7 @@ async def dialog_input(message: Message):
 @router.message(
     F.chat.type == ChatType.PRIVATE,
     F.from_user.is_not(None),
-    F.from_user.func(lambda u: u and u.id in DIALOGS),
+    F.from_user.func(lambda u: u and DIALOGS.get(u.id, {}).get("command") == "say_photo"),
     F.photo,
 )
 async def dialog_photo_input(message: Message):
@@ -294,7 +294,7 @@ async def dialog_photo_input(message: Message):
 @router.message(
     F.chat.type == ChatType.PRIVATE,
     F.from_user.is_not(None),
-    F.from_user.func(lambda u: u and u.id in DIALOGS),
+    F.from_user.func(lambda u: u and DIALOGS.get(u.id, {}).get("command") == "say_gif"),
     (F.animation | F.document),
 )
 async def dialog_gif_input(message: Message):
@@ -323,7 +323,7 @@ async def dialog_gif_input(message: Message):
 @router.message(
     F.chat.type == ChatType.PRIVATE,
     F.from_user.is_not(None),
-    F.from_user.func(lambda u: u and u.id in DIALOGS),
+    F.from_user.func(lambda u: u and DIALOGS.get(u.id, {}).get("command") == "say_video"),
     F.video,
 )
 async def dialog_video_input(message: Message):
