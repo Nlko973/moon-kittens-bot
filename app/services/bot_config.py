@@ -20,6 +20,7 @@ PARAM_DEFAULTS = {
     "raid_window_seconds": RAID_WINDOW_SECONDS,
     "raid_mode_minutes": RAID_MODE_MINUTES,
     "third_warn_mute_minutes": 60 * 24 * 30,
+    "cleanup_warn_duration_minutes": 60 * 24 * 30,
 }
 
 

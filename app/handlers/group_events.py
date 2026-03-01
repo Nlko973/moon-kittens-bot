@@ -8,12 +8,12 @@ from aiogram.types import ChatMemberUpdated, Message
 from app.runtime import bot
 from app.services.access import is_bot_admin
 from app.services.automation import add_message_and_guard, register_join_event
-from app.services.duration_parser import parse_ru_duration_to_minutes
+from app.services.duration_parser import parse_deadline, parse_ru_duration_to_minutes
 from app.services.moderation import issue_warn, mute_user
 from app.services.chat_settings import get_group_id
 from app.services.roles import apply_role_signature, remove_role_signature
 from app.services.targets import parse_target
-from db import is_tg_links_block_enabled, mark_user_left
+from db import is_tg_links_block_enabled, mark_user_joined, mark_user_left
 
 router = Router()
 TG_LINK_RE = re.compile(r"(?i)(?:https?://)?(?:t|telegram)\.me/[^\s]+")
@@ -64,6 +64,7 @@ async def on_chat_member(event: ChatMemberUpdated):
     )
 
     if joined and register_join_event():
+        mark_user_joined(user.id, user.username, user.full_name)
         try:
             await bot.send_message(
                 get_group_id(),
@@ -71,6 +72,8 @@ async def on_chat_member(event: ChatMemberUpdated):
             )
         except TelegramBadRequest:
             pass
+    elif joined:
+        mark_user_joined(user.id, user.username, user.full_name)
 
 
 @router.message(F.text.regexp(r"^\+роль\s+.+$"))
@@ -132,8 +135,33 @@ async def cmd_warn_word(message: Message):
     if not user_id:
         await message.answer("⚠️ Пользователь не найден в базе.")
         return
-    reason = (match.group(2) or "Без причины").strip()
-    warn_id, total, third, expires_at = await issue_warn(user_id, message.from_user.id, reason, "manual")
+    reason_raw = (match.group(2) or "Без причины").strip()
+    reason = reason_raw
+    expires_at = None
+    parts = reason_raw.split(maxsplit=2)
+    if len(parts) >= 2 and parts[0].lower() == "до":
+        maybe_deadline = parse_deadline(parts[1])
+        if maybe_deadline:
+            expires_at = maybe_deadline.isoformat(timespec="seconds")
+            reason = parts[2].strip() if len(parts) > 2 else "Без причины"
+    elif len(parts) >= 2:
+        maybe_deadline = parse_deadline(f"{parts[0]} {parts[1]}")
+        if maybe_deadline:
+            expires_at = maybe_deadline.isoformat(timespec="seconds")
+            reason = parts[2].strip() if len(parts) > 2 else "Без причины"
+    elif len(parts) == 1:
+        maybe_deadline = parse_deadline(parts[0])
+        if maybe_deadline:
+            expires_at = maybe_deadline.isoformat(timespec="seconds")
+            reason = "Без причины"
+
+    warn_id, total, third, expires_at = await issue_warn(
+        user_id,
+        message.from_user.id,
+        reason,
+        "manual",
+        expires_at=expires_at,
+    )
     expires_text = expires_at.replace("T", " ")
     suffix = " Пользователь автоматически получил мут (3-й варн)." if third else ""
     await message.answer(f"✅ Варн выдан: #{warn_id}. Активных варнов: {total}. Срок до: {expires_text}.{suffix}")

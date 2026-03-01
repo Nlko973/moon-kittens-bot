@@ -1,6 +1,7 @@
 from aiogram import Dispatcher
 
 from app.handlers.admin import router as admin_router
+from app.handlers.admin_dialogs import router as admin_dialogs_router
 from app.handlers.callbacks import router as callbacks_router
 from app.handlers.common import router as common_router
 from app.handlers.group_events import router as group_events_router
@@ -13,6 +14,7 @@ def register_handlers(dp: Dispatcher):
     dp.include_router(callbacks_router)
     dp.include_router(common_router)
     dp.include_router(member_router)
+    dp.include_router(admin_dialogs_router)
     dp.include_router(admin_router)
     dp.include_router(group_events_router)
     dp.include_router(safety_start_router)

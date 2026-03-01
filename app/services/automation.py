@@ -36,6 +36,7 @@ spam_buckets = defaultdict(deque)
 join_events = deque()
 raid_mode_until: Optional[datetime] = None
 last_daily_run: Optional[str] = None
+last_friday_report: Optional[str] = None
 
 
 async def _send_chunked(chat_id: int, lines: list[str], chunk_limit: int = 3500):
@@ -56,7 +57,7 @@ async def _send_pre_cleanup_report_to_owner(rows, norm: int):
     lacking = [row for row in rows if row["count"] < norm]
     ok = len(rows) - len(lacking)
     lines = [
-        f"📈 Предчистка: {week_period(datetime.now())}",
+        f"?? Предчистка: {week_period(datetime.now())}",
         f"Норма: {norm}",
         f"Участников в учете: {len(rows)}",
         f"С нормой: {ok}",
@@ -73,6 +74,31 @@ async def _send_pre_cleanup_report_to_owner(rows, norm: int):
         await _send_chunked(OWNER_ID, lines)
     except TelegramBadRequest:
         pass
+
+
+def _is_newcomer(first_seen_at: Optional[str], min_days: int = 7) -> bool:
+    if not first_seen_at:
+        return False
+    try:
+        joined_at = datetime.fromisoformat(first_seen_at)
+    except ValueError:
+        return False
+    return datetime.now() - joined_at < timedelta(days=min_days)
+
+
+async def _send_friday_lacking_report():
+    rows = get_cleanup_candidates()
+    norm = get_weekly_norm()
+    lacking = [row for row in rows if row["count"] < norm]
+    if not lacking:
+        await bot.send_message(get_group_id(), "?? Отчет по норме: у всех есть недельная норма.")
+        return
+
+    lines = [f"?? Список без нормы ({week_period(datetime.now())}):"]
+    for row in lacking[:80]:
+        newcomer_mark = " (новичок < 7 дней)" if _is_newcomer(row["first_seen_at"]) else ""
+        lines.append(f"- {format_user(row['username'], row['display_name'])}: {row['count']}/{norm}{newcomer_mark}")
+    await _send_chunked(get_group_id(), lines)
 
 
 def register_join_event() -> bool:
@@ -132,19 +158,54 @@ async def run_week_cleanup():
     await _send_pre_cleanup_report_to_owner(rows, norm)
 
     punished = []
+    skipped_newcomers = []
+    cleanup_warn_minutes = get_int_param("cleanup_warn_duration_minutes")
+
     for row in rows:
         if row["count"] >= norm:
             continue
-        warn_id, _total, _third, _expires_at = await issue_warn(row["user_id"], 0, "Нет недельной нормы", "norma")
+        if _is_newcomer(row["first_seen_at"]):
+            skipped_newcomers.append(row)
+            continue
+
+        warn_id, _total, _third, _expires_at = await issue_warn(
+            row["user_id"],
+            0,
+            "Нет недельной нормы",
+            "norma",
+            duration_minutes=cleanup_warn_minutes,
+        )
         punished.append((row, warn_id))
 
     if punished:
-        lines = [f"🧹 Чистка за неделю {week_period(datetime.now())}. Выдано варнов: {len(punished)}."]
-        for row, _warn_id in punished[:30]:
-            lines.append(f"{format_user(row['username'], row['display_name'])} - {row['count']}/{norm}")
-        await bot.send_message(group_id, "\n".join(lines))
+        lines = [f"?? Чистка за неделю {week_period(datetime.now())}. Выдано варнов: {len(punished)}."]
+        for row, warn_id in punished[:60]:
+            lines.append(f"- #{warn_id} {format_user(row['username'], row['display_name'])}: {row['count']}/{norm}")
+        if skipped_newcomers:
+            lines.append(f"Новички (<7 дней) без варна: {len(skipped_newcomers)}.")
+        await _send_chunked(group_id, lines)
     else:
-        await bot.send_message(group_id, f"🧹 Чистка за неделю {week_period(datetime.now())}: нарушений нет.")
+        extra = ""
+        if skipped_newcomers:
+            extra = f" Новичков без варна: {len(skipped_newcomers)}."
+        await bot.send_message(group_id, f"?? Чистка за неделю {week_period(datetime.now())}: нарушений нет.{extra}")
+
+    owner_lines = [
+        f"?? Статистика чистки за неделю {week_period(datetime.now())}:",
+        f"Норма: {norm}",
+        f"Всего участников в учете: {len(rows)}",
+        f"Выдано варнов: {len(punished)}",
+        f"Пропущено новичков (<7 дней): {len(skipped_newcomers)}",
+    ]
+    if punished:
+        owner_lines.append("Список с варнами:")
+        for row, warn_id in punished[:200]:
+            owner_lines.append(f"- #{warn_id} {format_user(row['username'], row['display_name'])} ({row['count']}/{norm})")
+
+    try:
+        await _send_chunked(OWNER_ID, owner_lines)
+    except TelegramBadRequest:
+        pass
 
 
 async def run_inactivity_checks():
@@ -160,7 +221,7 @@ async def run_inactivity_checks():
         await bot.send_message(
             group_id,
             (
-                f"⏳ {user_tag} — вы были неактивны {inactivity_notice_days} дней. "
+                f"? {user_tag} — вы были неактивны {inactivity_notice_days} дней. "
                 f"Если не напишете сообщение, через {inactivity_warn_days - inactivity_notice_days} дней "
                 "будет выдан варн за неактив."
             ),
@@ -174,7 +235,7 @@ async def run_inactivity_checks():
         warn_id, _total, _third, _expires_at = await issue_warn(row["user_id"], 0, "Неактив 10 дней", "inactive")
         mark_inactive_warned(row["user_id"])
         user_tag = format_user(row["username"], row["display_name"])
-        await bot.send_message(group_id, f"⚠️ {user_tag} — выдан варн за неактив (#{warn_id}).")
+        await bot.send_message(group_id, f"?? {user_tag} — выдан варн за неактив (#{warn_id}).")
 
 
 async def run_unmute_checks():
@@ -187,14 +248,14 @@ async def run_unmute_checks():
             if brief:
                 await bot.send_message(
                     group_id,
-                    f"✅ {format_user(brief['username'], brief['display_name'])} — мут автоматически снят.",
+                    f"? {format_user(brief['username'], brief['display_name'])} — мут автоматически снят.",
                 )
         except TelegramBadRequest:
             remove_mute(row["user_id"])
 
 
 async def background_jobs():
-    global last_daily_run
+    global last_daily_run, last_friday_report
 
     while True:
         try:
@@ -206,12 +267,18 @@ async def background_jobs():
                 delete_absent_over_30_days()
                 last_daily_run = now.date().isoformat()
 
+            if now.weekday() == 4 and now.hour >= 12:
+                today = now.date().isoformat()
+                if last_friday_report != today:
+                    await _send_friday_lacking_report()
+                    last_friday_report = today
+
             if now.weekday() == 6 and now.hour >= 23 and now.minute >= 55:
                 today = now.date().isoformat()
                 if get_last_cleanup_date() != today:
                     group_id = get_group_id()
                     if consume_cleanup_skip_once():
-                        await bot.send_message(group_id, "ℹ️ Чистка недели пропущена (одноразовый пропуск).")
+                        await bot.send_message(group_id, "?? Чистка недели пропущена (одноразовый пропуск).")
                         set_last_cleanup_date(today)
                     elif not is_cleanup_enabled():
                         set_last_cleanup_date(today)

@@ -289,6 +289,30 @@ def upsert_user_profile(user_id: int, username: Optional[str], display_name: str
     conn.close()
 
 
+def mark_user_joined(user_id: int, username: Optional[str], display_name: str, joined_at: Optional[datetime] = None):
+    joined_at = joined_at or datetime.now()
+    joined_iso = joined_at.isoformat(timespec="seconds")
+
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        INSERT INTO users (user_id, username, display_name, is_member, left_at, first_seen_at, updated_at)
+        VALUES (?, ?, ?, 1, NULL, ?, ?)
+        ON CONFLICT(user_id) DO UPDATE SET
+            username = excluded.username,
+            display_name = excluded.display_name,
+            is_member = 1,
+            left_at = NULL,
+            first_seen_at = COALESCE(users.first_seen_at, excluded.first_seen_at),
+            updated_at = excluded.updated_at
+        """,
+        (user_id, username, display_name, joined_iso, joined_iso),
+    )
+    conn.commit()
+    conn.close()
+
+
 def add_message(user_id: int, username: Optional[str], display_name: str, at: Optional[datetime] = None):
     at = at or datetime.now()
     at_iso = at.isoformat(timespec="seconds")
@@ -506,6 +530,40 @@ def remove_rest(user_id: int):
     conn.close()
 
 
+def extend_rest(user_id: int, minutes: int) -> bool:
+    if minutes <= 0:
+        return False
+
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("SELECT expires_at FROM rests WHERE user_id = ?", (user_id,))
+    row = cur.fetchone()
+    if not row:
+        conn.close()
+        return False
+
+    now = datetime.now()
+    current = row["expires_at"]
+    if current:
+        try:
+            base = datetime.fromisoformat(current)
+            if base < now:
+                base = now
+        except ValueError:
+            base = now
+    else:
+        base = now
+
+    expires_at = (base + timedelta(minutes=minutes)).isoformat(timespec="seconds")
+    cur.execute(
+        "UPDATE rests SET expires_at = ?, created_at = ? WHERE user_id = ?",
+        (expires_at, now_iso(), user_id),
+    )
+    conn.commit()
+    conn.close()
+    return True
+
+
 def get_rest(user_id: int):
     _expire_old_rests()
     conn = get_conn()
@@ -553,9 +611,11 @@ def create_warn(
     admin_id: int,
     reason: str,
     warn_type: str = "manual",
-    duration_days: int = 30,
+    expires_at: Optional[str] = None,
+    duration_minutes: int = 60 * 24 * 30,
 ) -> tuple[int, str]:
-    expires_at = (datetime.now() + timedelta(days=duration_days)).isoformat(timespec="seconds")
+    if expires_at is None:
+        expires_at = (datetime.now() + timedelta(minutes=max(1, duration_minutes))).isoformat(timespec="seconds")
     conn = get_conn()
     cur = conn.cursor()
     cur.execute(
@@ -709,7 +769,7 @@ def get_cleanup_candidates(week_start: Optional[str] = None):
     cur = conn.cursor()
     cur.execute(
         """
-        SELECT u.user_id, u.username, u.display_name, COALESCE(w.count, 0) AS count
+        SELECT u.user_id, u.username, u.display_name, u.first_seen_at, COALESCE(w.count, 0) AS count
         FROM users u
         LEFT JOIN weekly_stats w ON w.user_id = u.user_id AND w.week_start = ?
         LEFT JOIN rests r ON r.user_id = u.user_id

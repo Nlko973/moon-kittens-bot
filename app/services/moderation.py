@@ -1,16 +1,18 @@
 ﻿from datetime import datetime, timedelta
+from typing import Optional
 
 from aiogram.enums import ChatMemberStatus
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import ChatPermissions
 
-from app.services.bot_config import get_int_param
 from app.keyboards import owner_third_warn_actions
 from app.runtime import bot
+from app.services.bot_config import get_int_param
 from app.services.chat_settings import get_group_id
 from app.texts import owner_third_warn_notice
 from config import OWNER_ID
 from db import create_warn, get_active_warn_count, get_mute, get_user_brief, remove_mute, set_mute
+
 
 async def mute_user(user_id: int, minutes: int, issued_by: int, reason: str) -> str:
     group_id = get_group_id()
@@ -117,8 +119,17 @@ async def issue_warn(
     admin_id: int,
     reason: str,
     warn_type: str = "manual",
+    expires_at: Optional[str] = None,
+    duration_minutes: int = 60 * 24 * 30,
 ) -> tuple[int, int, bool, str]:
-    warn_id, expires_at = create_warn(user_id, admin_id, reason, warn_type, duration_days=30)
+    warn_id, expires_at = create_warn(
+        user_id,
+        admin_id,
+        reason,
+        warn_type,
+        expires_at=expires_at,
+        duration_minutes=duration_minutes,
+    )
     total = get_active_warn_count(user_id)
     third_triggered = total == 3
 
