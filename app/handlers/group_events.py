@@ -13,6 +13,7 @@ from app.services.moderation import issue_warn, mute_user
 from app.services.chat_settings import get_group_id
 from app.services.roles import apply_role_signature, remove_role_signature
 from app.services.targets import parse_target
+from app.services.user_identity import remember_user
 from db import is_tg_links_block_enabled, mark_user_joined, mark_user_left
 
 router = Router()
@@ -64,6 +65,7 @@ async def on_chat_member(event: ChatMemberUpdated):
     )
 
     if joined and register_join_event():
+        remember_user(user)
         mark_user_joined(user.id, user.username, user.full_name)
         try:
             await bot.send_message(
@@ -73,6 +75,7 @@ async def on_chat_member(event: ChatMemberUpdated):
         except TelegramBadRequest:
             pass
     elif joined:
+        remember_user(user)
         mark_user_joined(user.id, user.username, user.full_name)
 
 
@@ -90,7 +93,7 @@ async def cmd_role_plus_group(message: Message):
         await message.answer("Формат: +роль @username роль")
         return
 
-    user_id = parse_target(match.group(1).strip())
+    user_id = await parse_target(match.group(1).strip())
     if not user_id:
         await message.answer("⚠️ Пользователь не найден в базе.")
         return
@@ -113,7 +116,7 @@ async def cmd_role_minus_group(message: Message):
         await message.answer("Формат: -роль @username")
         return
 
-    user_id = parse_target(match.group(1).strip())
+    user_id = await parse_target(match.group(1).strip())
     if not user_id:
         await message.answer("⚠️ Пользователь не найден в базе.")
         return
@@ -131,7 +134,7 @@ async def cmd_warn_word(message: Message):
     if not match:
         await message.answer("Формат: варн @username причина")
         return
-    user_id = parse_target(match.group(1).strip())
+    user_id = await parse_target(match.group(1).strip())
     if not user_id:
         await message.answer("⚠️ Пользователь не найден в базе.")
         return
@@ -177,7 +180,7 @@ async def cmd_mute_word(message: Message):
     if not match:
         await message.answer("Формат: мут @username 5 минут [причина]")
         return
-    user_id = parse_target(match.group(1).strip())
+    user_id = await parse_target(match.group(1).strip())
     if not user_id:
         await message.answer("⚠️ Пользователь не найден в базе.")
         return
@@ -202,7 +205,7 @@ async def cmd_ban_word(message: Message):
     if not match:
         await message.answer("Формат: бан @username [причина]")
         return
-    user_id = parse_target(match.group(1).strip())
+    user_id = await parse_target(match.group(1).strip())
     if not user_id:
         await message.answer("⚠️ Пользователь не найден в базе.")
         return
@@ -225,7 +228,7 @@ async def cmd_kick_word(message: Message):
     if not match:
         await message.answer("Формат: кик @username [причина]")
         return
-    user_id = parse_target(match.group(1).strip())
+    user_id = await parse_target(match.group(1).strip())
     if not user_id:
         await message.answer("⚠️ Пользователь не найден в базе.")
         return
@@ -246,6 +249,7 @@ async def on_group_message(message: Message):
         return
     if message.chat.id != get_group_id():
         return
+    remember_user(message.from_user)
 
     if is_tg_links_block_enabled() and not is_bot_admin(message.from_user.id):
         if _message_has_tg_link(message):

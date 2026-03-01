@@ -283,7 +283,7 @@ def upsert_user_profile(user_id: int, username: Optional[str], display_name: str
             display_name = excluded.display_name,
             updated_at = excluded.updated_at
         """,
-        (user_id, username, display_name, now, now),
+        (user_id, None, display_name, now, now),
     )
     conn.commit()
     conn.close()
@@ -307,7 +307,7 @@ def mark_user_joined(user_id: int, username: Optional[str], display_name: str, j
             first_seen_at = COALESCE(users.first_seen_at, excluded.first_seen_at),
             updated_at = excluded.updated_at
         """,
-        (user_id, username, display_name, joined_iso, joined_iso),
+        (user_id, None, display_name, joined_iso, joined_iso),
     )
     conn.commit()
     conn.close()
@@ -336,7 +336,7 @@ def add_message(user_id: int, username: Optional[str], display_name: str, at: Op
             inactive_notice_at = NULL,
             inactive_warned_at = NULL
         """,
-        (user_id, username, display_name, at_iso, at_iso, at_iso),
+        (user_id, None, display_name, at_iso, at_iso, at_iso),
     )
 
     cur.execute(
@@ -365,16 +365,8 @@ def mark_user_left(user_id: int):
 
 
 def get_user_id_by_username(username: str) -> Optional[int]:
-    username = username.lstrip("@").lower()
-    conn = get_conn()
-    cur = conn.cursor()
-    cur.execute(
-        "SELECT user_id FROM users WHERE lower(username) = ?",
-        (username,),
-    )
-    row = cur.fetchone()
-    conn.close()
-    return row["user_id"] if row else None
+    # Username lookup is not persisted in DB anymore.
+    return None
 
 
 def get_user_week_count(user_id: int, week_start: Optional[str] = None) -> int:
@@ -845,7 +837,7 @@ def create_complaint(user_id: int, username: Optional[str], display_name: str, t
         INSERT INTO complaints (user_id, username, display_name, text, created_at)
         VALUES (?, ?, ?, ?, ?)
         """,
-        (user_id, username, display_name, text, now_iso()),
+        (user_id, None, display_name, text, now_iso()),
     )
     complaint_id = cur.lastrowid
     conn.commit()

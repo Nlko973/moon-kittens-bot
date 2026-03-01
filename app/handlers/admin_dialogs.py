@@ -7,7 +7,7 @@ from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import Message
 
 from app.runtime import bot
-from app.services.access import require_private_admin
+from app.services.access import require_owner, require_private_admin
 from app.services.chat_settings import get_group_id
 from app.services.duration_parser import parse_deadline, parse_ru_duration_to_minutes
 from app.services.moderation import issue_warn, mute_user, unmute_user
@@ -29,7 +29,7 @@ def _stop_dialog(user_id: int):
     DIALOGS.pop(user_id, None)
 
 
-@router.message(F.chat.type == ChatType.PRIVATE, F.text.regexp(r"(?i)^/warn(?:@\w+)?\s*$"))
+@router.message(F.chat.type == ChatType.PRIVATE, F.text.regexp(r"(?i)^/warn(?:@\w+)?(?:\s+.*)?$"))
 async def dialog_warn_start(message: Message):
     if not await require_private_admin(message):
         return
@@ -37,7 +37,7 @@ async def dialog_warn_start(message: Message):
     await message.answer("Команда /warn: укажите пользователя (id или @username). Для отмены: стоп/отмена.")
 
 
-@router.message(F.chat.type == ChatType.PRIVATE, F.text.regexp(r"(?i)^/rest_add(?:@\w+)?\s*$"))
+@router.message(F.chat.type == ChatType.PRIVATE, F.text.regexp(r"(?i)^/rest_add(?:@\w+)?(?:\s+.*)?$"))
 async def dialog_rest_add_start(message: Message):
     if not await require_private_admin(message):
         return
@@ -45,7 +45,7 @@ async def dialog_rest_add_start(message: Message):
     await message.answer("Команда /rest_add: укажите пользователя (id или @username). Для отмены: стоп/отмена.")
 
 
-@router.message(F.chat.type == ChatType.PRIVATE, F.text.regexp(r"(?i)^/rest_extend(?:@\w+)?\s*$"))
+@router.message(F.chat.type == ChatType.PRIVATE, F.text.regexp(r"(?i)^/rest_extend(?:@\w+)?(?:\s+.*)?$"))
 async def dialog_rest_extend_start(message: Message):
     if not await require_private_admin(message):
         return
@@ -53,7 +53,7 @@ async def dialog_rest_extend_start(message: Message):
     await message.answer("Команда /rest_extend: укажите пользователя (id или @username). Для отмены: стоп/отмена.")
 
 
-@router.message(F.chat.type == ChatType.PRIVATE, F.text.regexp(r"(?i)^/rest_del(?:@\w+)?\s*$"))
+@router.message(F.chat.type == ChatType.PRIVATE, F.text.regexp(r"(?i)^/rest_del(?:@\w+)?(?:\s+.*)?$"))
 async def dialog_rest_del_start(message: Message):
     if not await require_private_admin(message):
         return
@@ -61,7 +61,7 @@ async def dialog_rest_del_start(message: Message):
     await message.answer("Команда /rest_del: укажите пользователя (id или @username). Для отмены: стоп/отмена.")
 
 
-@router.message(F.chat.type == ChatType.PRIVATE, F.text.regexp(r"(?i)^/mute(?:@\w+)?\s*$"))
+@router.message(F.chat.type == ChatType.PRIVATE, F.text.regexp(r"(?i)^/mute(?:@\w+)?(?:\s+.*)?$"))
 async def dialog_mute_start(message: Message):
     if not await require_private_admin(message):
         return
@@ -69,7 +69,7 @@ async def dialog_mute_start(message: Message):
     await message.answer("Команда /mute: укажите пользователя (id или @username). Для отмены: стоп/отмена.")
 
 
-@router.message(F.chat.type == ChatType.PRIVATE, F.text.regexp(r"(?i)^/unmute(?:@\w+)?\s*$"))
+@router.message(F.chat.type == ChatType.PRIVATE, F.text.regexp(r"(?i)^/unmute(?:@\w+)?(?:\s+.*)?$"))
 async def dialog_unmute_start(message: Message):
     if not await require_private_admin(message):
         return
@@ -77,7 +77,7 @@ async def dialog_unmute_start(message: Message):
     await message.answer("Команда /unmute: укажите пользователя (id или @username). Для отмены: стоп/отмена.")
 
 
-@router.message(F.chat.type == ChatType.PRIVATE, F.text.regexp(r"(?i)^/ban(?:@\w+)?\s*$"))
+@router.message(F.chat.type == ChatType.PRIVATE, F.text.regexp(r"(?i)^/ban(?:@\w+)?(?:\s+.*)?$"))
 async def dialog_ban_start(message: Message):
     if not await require_private_admin(message):
         return
@@ -85,7 +85,7 @@ async def dialog_ban_start(message: Message):
     await message.answer("Команда /ban: укажите пользователя (id или @username). Для отмены: стоп/отмена.")
 
 
-@router.message(F.chat.type == ChatType.PRIVATE, F.text.regexp(r"(?i)^/kick(?:@\w+)?\s*$"))
+@router.message(F.chat.type == ChatType.PRIVATE, F.text.regexp(r"(?i)^/kick(?:@\w+)?(?:\s+.*)?$"))
 async def dialog_kick_start(message: Message):
     if not await require_private_admin(message):
         return
@@ -93,7 +93,7 @@ async def dialog_kick_start(message: Message):
     await message.answer("Команда /kick: укажите пользователя (id или @username). Для отмены: стоп/отмена.")
 
 
-@router.message(F.chat.type == ChatType.PRIVATE, F.text.regexp(r"(?i)^/unban(?:@\w+)?\s*$"))
+@router.message(F.chat.type == ChatType.PRIVATE, F.text.regexp(r"(?i)^/unban(?:@\w+)?(?:\s+.*)?$"))
 async def dialog_unban_start(message: Message):
     if not await require_private_admin(message):
         return
@@ -101,12 +101,44 @@ async def dialog_unban_start(message: Message):
     await message.answer("Команда /unban: укажите пользователя (id или @username). Для отмены: стоп/отмена.")
 
 
-@router.message(F.chat.type == ChatType.PRIVATE, F.text.regexp(r"(?i)^/unwarn(?:@\w+)?\s*$"))
+@router.message(F.chat.type == ChatType.PRIVATE, F.text.regexp(r"(?i)^/unwarn(?:@\w+)?(?:\s+.*)?$"))
 async def dialog_unwarn_start(message: Message):
     if not await require_private_admin(message):
         return
     _start_dialog(message.from_user.id, "unwarn")
     await message.answer("Команда /unwarn: укажите warn_id или пользователя (id/@username). Для отмены: стоп/отмена.")
+
+
+@router.message(F.chat.type == ChatType.PRIVATE, F.text.regexp(r"(?i)^/say(?:@\w+)?(?:\s+.*)?$"))
+async def dialog_say_start(message: Message):
+    if not await require_owner(message):
+        return
+    _start_dialog(message.from_user.id, "say")
+    await message.answer("Команда /say: отправьте следующим сообщением текст для группы. Для отмены: стоп/отмена.")
+
+
+@router.message(F.chat.type == ChatType.PRIVATE, F.text.regexp(r"(?i)^/say_photo(?:@\w+)?(?:\s+.*)?$"))
+async def dialog_say_photo_start(message: Message):
+    if not await require_owner(message):
+        return
+    _start_dialog(message.from_user.id, "say_photo")
+    await message.answer("Команда /say_photo: отправьте фото следующим сообщением. Для отмены: стоп/отмена.")
+
+
+@router.message(F.chat.type == ChatType.PRIVATE, F.text.regexp(r"(?i)^/say_gif(?:@\w+)?(?:\s+.*)?$"))
+async def dialog_say_gif_start(message: Message):
+    if not await require_owner(message):
+        return
+    _start_dialog(message.from_user.id, "say_gif")
+    await message.answer("Команда /say_gif: отправьте GIF следующим сообщением. Для отмены: стоп/отмена.")
+
+
+@router.message(F.chat.type == ChatType.PRIVATE, F.text.regexp(r"(?i)^/say_video(?:@\w+)?(?:\s+.*)?$"))
+async def dialog_say_video_start(message: Message):
+    if not await require_owner(message):
+        return
+    _start_dialog(message.from_user.id, "say_video")
+    await message.answer("Команда /say_video: отправьте видео следующим сообщением. Для отмены: стоп/отмена.")
 
 
 @router.message(
@@ -153,15 +185,90 @@ async def dialog_input(message: Message):
         await _handle_unban_dialog(message, step, text)
     elif command == "unwarn":
         await _handle_unwarn_dialog(message, step, text)
+    elif command == "say":
+        await _handle_say_dialog(message, step, text)
+    elif command == "say_photo":
+        await message.answer("Ожидаю фото следующим сообщением. Для отмены: стоп/отмена.")
+    elif command == "say_gif":
+        await message.answer("Ожидаю GIF следующим сообщением. Для отмены: стоп/отмена.")
+    elif command == "say_video":
+        await message.answer("Ожидаю видео следующим сообщением. Для отмены: стоп/отмена.")
 
 
-def _parse_user(raw: str) -> Optional[int]:
-    return parse_target(raw)
+@router.message(
+    F.chat.type == ChatType.PRIVATE,
+    F.from_user.is_not(None),
+    F.from_user.func(lambda u: u and u.id in DIALOGS),
+    F.photo,
+)
+async def dialog_photo_input(message: Message):
+    state = DIALOGS.get(message.from_user.id)
+    if not state or state["command"] != "say_photo":
+        return
+    if not await require_owner(message):
+        _stop_dialog(message.from_user.id)
+        return
+    file_id = message.photo[-1].file_id
+    await bot.send_photo(get_group_id(), photo=file_id, caption=message.caption)
+    _stop_dialog(message.from_user.id)
+    await message.answer("✅ Фото отправлено в группу.")
+
+
+@router.message(
+    F.chat.type == ChatType.PRIVATE,
+    F.from_user.is_not(None),
+    F.from_user.func(lambda u: u and u.id in DIALOGS),
+    (F.animation | F.document),
+)
+async def dialog_gif_input(message: Message):
+    state = DIALOGS.get(message.from_user.id)
+    if not state or state["command"] != "say_gif":
+        return
+    if not await require_owner(message):
+        _stop_dialog(message.from_user.id)
+        return
+
+    gif_id = None
+    if message.animation:
+        gif_id = message.animation.file_id
+    elif message.document and message.document.mime_type and "gif" in message.document.mime_type.lower():
+        gif_id = message.document.file_id
+
+    if not gif_id:
+        await message.answer("Это не GIF. Отправьте GIF или напишите стоп/отмена.")
+        return
+
+    await bot.send_animation(get_group_id(), animation=gif_id, caption=message.caption)
+    _stop_dialog(message.from_user.id)
+    await message.answer("✅ GIF отправлен в группу.")
+
+
+@router.message(
+    F.chat.type == ChatType.PRIVATE,
+    F.from_user.is_not(None),
+    F.from_user.func(lambda u: u and u.id in DIALOGS),
+    F.video,
+)
+async def dialog_video_input(message: Message):
+    state = DIALOGS.get(message.from_user.id)
+    if not state or state["command"] != "say_video":
+        return
+    if not await require_owner(message):
+        _stop_dialog(message.from_user.id)
+        return
+
+    await bot.send_video(get_group_id(), video=message.video.file_id, caption=message.caption)
+    _stop_dialog(message.from_user.id)
+    await message.answer("✅ Видео отправлено в группу.")
+
+
+async def _parse_user(raw: str) -> Optional[int]:
+    return await parse_target(raw)
 
 
 async def _handle_warn_dialog(message: Message, step: int, data: Dict[str, Any], text: str):
     if step == 0:
-        user_id = _parse_user(text)
+        user_id = await _parse_user(text)
         if not user_id:
             await message.answer(USER_NOT_FOUND)
             return
@@ -195,7 +302,7 @@ async def _handle_warn_dialog(message: Message, step: int, data: Dict[str, Any],
 
 async def _handle_rest_add_dialog(message: Message, step: int, data: Dict[str, Any], text: str):
     if step == 0:
-        user_id = _parse_user(text)
+        user_id = await _parse_user(text)
         if not user_id:
             await message.answer(USER_NOT_FOUND)
             return
@@ -227,7 +334,7 @@ async def _handle_rest_add_dialog(message: Message, step: int, data: Dict[str, A
 
 async def _handle_rest_extend_dialog(message: Message, step: int, data: Dict[str, Any], text: str):
     if step == 0:
-        user_id = _parse_user(text)
+        user_id = await _parse_user(text)
         if not user_id:
             await message.answer(USER_NOT_FOUND)
             return
@@ -254,7 +361,7 @@ async def _handle_rest_del_dialog(message: Message, step: int, text: str):
         _stop_dialog(message.from_user.id)
         return
 
-    user_id = _parse_user(text)
+    user_id = await _parse_user(text)
     if not user_id:
         await message.answer(USER_NOT_FOUND)
         return
@@ -266,7 +373,7 @@ async def _handle_rest_del_dialog(message: Message, step: int, text: str):
 
 async def _handle_mute_dialog(message: Message, step: int, data: Dict[str, Any], text: str):
     if step == 0:
-        user_id = _parse_user(text)
+        user_id = await _parse_user(text)
         if not user_id:
             await message.answer(USER_NOT_FOUND)
             return
@@ -295,7 +402,7 @@ async def _handle_unmute_dialog(message: Message, step: int, text: str):
         _stop_dialog(message.from_user.id)
         return
 
-    user_id = _parse_user(text)
+    user_id = await _parse_user(text)
     if not user_id:
         await message.answer(USER_NOT_FOUND)
         return
@@ -306,7 +413,7 @@ async def _handle_unmute_dialog(message: Message, step: int, text: str):
 
 async def _handle_ban_dialog(message: Message, step: int, data: Dict[str, Any], text: str):
     if step == 0:
-        user_id = _parse_user(text)
+        user_id = await _parse_user(text)
         if not user_id:
             await message.answer(USER_NOT_FOUND)
             return
@@ -325,7 +432,7 @@ async def _handle_ban_dialog(message: Message, step: int, data: Dict[str, Any], 
 
 async def _handle_kick_dialog(message: Message, step: int, data: Dict[str, Any], text: str):
     if step == 0:
-        user_id = _parse_user(text)
+        user_id = await _parse_user(text)
         if not user_id:
             await message.answer(USER_NOT_FOUND)
             return
@@ -349,7 +456,7 @@ async def _handle_unban_dialog(message: Message, step: int, text: str):
         _stop_dialog(message.from_user.id)
         return
 
-    user_id = _parse_user(text)
+    user_id = await _parse_user(text)
     if not user_id:
         await message.answer(USER_NOT_FOUND)
         return
@@ -376,7 +483,7 @@ async def _handle_unwarn_dialog(message: Message, step: int, text: str):
             await message.answer("⚠️ Активный варн с таким ID не найден.")
         return
 
-    user_id = parse_target(raw)
+    user_id = await parse_target(raw)
     if not user_id:
         await message.answer(USER_NOT_FOUND)
         return
@@ -387,6 +494,15 @@ async def _handle_unwarn_dialog(message: Message, step: int, text: str):
         await message.answer("⚠️ У пользователя нет активных варнов.")
         return
     await message.answer(f"✅ Снят последний активный варн пользователя: #{removed_warn_id}.")
+
+
+async def _handle_say_dialog(message: Message, step: int, text: str):
+    if step != 0:
+        _stop_dialog(message.from_user.id)
+        return
+    await bot.send_message(get_group_id(), text)
+    _stop_dialog(message.from_user.id)
+    await message.answer("✅ Сообщение отправлено в группу.")
 
 
 

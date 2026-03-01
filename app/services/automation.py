@@ -11,7 +11,8 @@ from app.services.access import is_bot_admin
 from app.services.bot_config import get_int_param
 from app.services.chat_settings import get_group_id
 from app.services.moderation import issue_warn, mute_user, unmute_user
-from app.texts import format_user, week_period
+from app.services.user_identity import remember_user, resolve_user_label
+from app.texts import week_period
 from config import OWNER_ID
 from db import (
     add_message,
@@ -66,7 +67,8 @@ async def _send_pre_cleanup_report_to_owner(rows, norm: int):
     ]
     if lacking:
         for row in lacking[:200]:
-            lines.append(f"- {format_user(row['username'], row['display_name'])}: {row['count']}/{norm}")
+            user_label = await resolve_user_label(row["user_id"], row["display_name"])
+            lines.append(f"- {user_label}: {row['count']}/{norm}")
     else:
         lines.append("- Нет нарушителей")
 
@@ -97,7 +99,8 @@ async def _send_friday_lacking_report():
     lines = [f"?? Список без нормы ({week_period(datetime.now())}):"]
     for row in lacking[:80]:
         newcomer_mark = " (новичок < 7 дней)" if _is_newcomer(row["first_seen_at"]) else ""
-        lines.append(f"- {format_user(row['username'], row['display_name'])}: {row['count']}/{norm}{newcomer_mark}")
+        user_label = await resolve_user_label(row["user_id"], row["display_name"])
+        lines.append(f"- {user_label}: {row['count']}/{norm}{newcomer_mark}")
     await _send_chunked(get_group_id(), lines)
 
 
@@ -125,6 +128,7 @@ async def add_message_and_guard(message: Message):
     spam_mute_minutes = get_int_param("spam_mute_minutes")
 
     user = message.from_user
+    remember_user(user)
 
     add_message(user_id=user.id, username=user.username, display_name=user.full_name)
 
@@ -139,7 +143,8 @@ async def add_message_and_guard(message: Message):
 
     if len(bucket) >= spam_limit_count:
         text = await mute_user(user.id, spam_mute_minutes, 0, "Антиспам")
-        await message.answer(f"{format_user(user.username, user.full_name)} - {text}")
+        user_label = await resolve_user_label(user.id, user.full_name)
+        await message.answer(f"{user_label} - {text}")
         bucket.clear()
         return
 
@@ -147,7 +152,8 @@ async def add_message_and_guard(message: Message):
         count = get_user_week_count(user.id)
         if count <= 2:
             text = await mute_user(user.id, 30, 0, "Антирейд")
-            await message.answer(f"{format_user(user.username, user.full_name)} - {text}")
+            user_label = await resolve_user_label(user.id, user.full_name)
+            await message.answer(f"{user_label} - {text}")
 
 
 async def run_week_cleanup():
@@ -180,7 +186,8 @@ async def run_week_cleanup():
     if punished:
         lines = [f"?? Чистка за неделю {week_period(datetime.now())}. Выдано варнов: {len(punished)}."]
         for row, warn_id in punished[:60]:
-            lines.append(f"- #{warn_id} {format_user(row['username'], row['display_name'])}: {row['count']}/{norm}")
+            user_label = await resolve_user_label(row["user_id"], row["display_name"])
+            lines.append(f"- #{warn_id} {user_label}: {row['count']}/{norm}")
         if skipped_newcomers:
             lines.append(f"Новички (<7 дней) без варна: {len(skipped_newcomers)}.")
         await _send_chunked(group_id, lines)
@@ -200,7 +207,8 @@ async def run_week_cleanup():
     if punished:
         owner_lines.append("Список с варнами:")
         for row, warn_id in punished[:200]:
-            owner_lines.append(f"- #{warn_id} {format_user(row['username'], row['display_name'])} ({row['count']}/{norm})")
+            user_label = await resolve_user_label(row["user_id"], row["display_name"])
+            owner_lines.append(f"- #{warn_id} {user_label} ({row['count']}/{norm})")
 
     try:
         await _send_chunked(OWNER_ID, owner_lines)
@@ -217,7 +225,7 @@ async def run_inactivity_checks():
     for row in to_notice:
         if row["inactive_notice_at"]:
             continue
-        user_tag = format_user(row["username"], row["display_name"])
+        user_tag = await resolve_user_label(row["user_id"], row["display_name"])
         await bot.send_message(
             group_id,
             (
@@ -234,7 +242,7 @@ async def run_inactivity_checks():
             continue
         warn_id, _total, _third, _expires_at = await issue_warn(row["user_id"], 0, "Неактив 10 дней", "inactive")
         mark_inactive_warned(row["user_id"])
-        user_tag = format_user(row["username"], row["display_name"])
+        user_tag = await resolve_user_label(row["user_id"], row["display_name"])
         await bot.send_message(group_id, f"?? {user_tag} — выдан варн за неактив (#{warn_id}).")
 
 
@@ -248,7 +256,7 @@ async def run_unmute_checks():
             if brief:
                 await bot.send_message(
                     group_id,
-                    f"? {format_user(brief['username'], brief['display_name'])} — мут автоматически снят.",
+                    f"✅ {await resolve_user_label(row['user_id'], brief['display_name'])} — мут автоматически снят.",
                 )
         except TelegramBadRequest:
             remove_mute(row["user_id"])

@@ -5,7 +5,7 @@ APP_NAME = "Moon Kittens Bot"
 
 ACCESS_DENIED = "нет доступа"
 OWNER_ONLY = "нет доступа"
-USER_NOT_FOUND = "⚠️ Не удалось определить пользователя. Используйте id или @username из базы."
+USER_NOT_FOUND = "⚠️ Не удалось определить пользователя. Используйте telegram id или @username."
 
 START_TEXT = (
     f"🤖 {APP_NAME}\n"
@@ -35,6 +35,7 @@ ADMIN_HELP = (
     "/unmute <user>\n"
     "/say_photo <file_id> [подпись] (владелец)\n"
     "/say_gif <file_id> [подпись] (владелец)\n"
+    "/say_video <file_id> [подпись] (владелец)\n"
     "+роль @username роль\n"
     "-роль @username\n"
     "Команды в группе: варн/мут/бан/кик @username ...\n"
