@@ -7,6 +7,7 @@ from aiogram.types import User
 
 from app.runtime import bot
 from app.services.chat_settings import get_group_id
+from app.texts import format_user
 
 _USERNAME_TO_ID: dict[str, int] = {}
 
@@ -43,10 +44,7 @@ async def resolve_user_label(user_id: int, fallback: Optional[str] = None) -> st
         member = await bot.get_chat_member(get_group_id(), user_id)
         user = member.user
         remember_user(user)
-        if user.username:
-            return f"@{user.username}"
-        if user.full_name:
-            return user.full_name
+        return format_user(user_id, user.username, user.full_name or fallback or str(user_id))
     except Exception:
         pass
-    return fallback or str(user_id)
+    return format_user(user_id, None, fallback or str(user_id))

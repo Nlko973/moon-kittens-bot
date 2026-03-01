@@ -1,4 +1,5 @@
 ﻿from datetime import datetime, timedelta
+from html import escape
 from typing import Optional
 
 APP_NAME = "Moon Kittens Bot"
@@ -43,8 +44,18 @@ ADMIN_HELP = (
 )
 
 
-def format_user(username: Optional[str], display_name: str) -> str:
-    return f"@{username}" if username else display_name
+def _trim_name(name: str, max_len: int = 25) -> str:
+    name = (name or "").strip()
+    if len(name) <= max_len:
+        return name
+    return name[:max_len]
+
+
+def format_user(user_id: int, username: Optional[str], display_name: str) -> str:
+    if username:
+        return f"@{username}"
+    short_name = escape(_trim_name(display_name or str(user_id)))
+    return f'<a href="tg://user?id={user_id}">{short_name}</a>'
 
 
 def week_period(now: datetime) -> str:
@@ -53,29 +64,29 @@ def week_period(now: datetime) -> str:
     return f"{monday.isoformat()} - {sunday.isoformat()}"
 
 
-def norm_status_text(username: Optional[str], display_name: str, count: int, norm: int) -> str:
+def norm_status_text(user_id: int, username: Optional[str], display_name: str, count: int, norm: int) -> str:
     has_norm = count >= norm
     status = "есть норма" if has_norm else "нет нормы"
     mark = "✅" if has_norm else "❌"
-    return f"{format_user(username, display_name)} - у вас {status} ({count}/{norm}) {mark}"
+    return f"{format_user(user_id, username, display_name)} - у вас {status} ({count}/{norm}) {mark}"
 
 
-def rest_status_none(username: Optional[str], display_name: str) -> str:
-    return f"{format_user(username, display_name)} - у вас нет реста."
+def rest_status_none(user_id: int, username: Optional[str], display_name: str) -> str:
+    return f"{format_user(user_id, username, display_name)} - у вас нет реста."
 
 
-def rest_status_infinite(username: Optional[str], display_name: str, role_name: str) -> str:
-    return f"{format_user(username, display_name)} - рест активен бессрочно ({role_name})."
+def rest_status_infinite(user_id: int, username: Optional[str], display_name: str, role_name: str) -> str:
+    return f"{format_user(user_id, username, display_name)} - рест активен бессрочно ({role_name})."
 
 
-def rest_status_with_days(username: Optional[str], display_name: str, role_name: str, days: int) -> str:
-    return f"{format_user(username, display_name)} - рест активен ({role_name}), осталось ~{days} дн."
+def rest_status_with_days(user_id: int, username: Optional[str], display_name: str, role_name: str, days: int) -> str:
+    return f"{format_user(user_id, username, display_name)} - рест активен ({role_name}), осталось ~{days} дн."
 
 
 def owner_third_warn_notice(user_id: int, username: Optional[str], display_name: str, warn_id: int) -> str:
     return (
         "🚨 Пользователь получил 3-й активный варн.\n"
-        f"Пользователь: {format_user(username, display_name)} ({user_id})\n"
+        f"Пользователь: {format_user(user_id, username, display_name)} ({user_id})\n"
         f"Последний варн: #{warn_id}\n"
         "Действие: автоматически выдан мут на 30 дней."
     )

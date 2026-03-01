@@ -143,6 +143,9 @@ def init_db():
     _ensure_column(cur, "users", "inactive_warned_at", "TEXT")
     _ensure_column(cur, "users", "first_seen_at", "TEXT")
     _ensure_column(cur, "warns", "expires_at", "TEXT")
+    # Username is not persisted; it is resolved by Telegram ID in runtime.
+    cur.execute("UPDATE users SET username = NULL")
+    cur.execute("UPDATE complaints SET username = NULL")
 
     if get_setting("weekly_norm", cur) is None:
         set_setting("weekly_norm", str(WEEKLY_NORM_DEFAULT), cur)

@@ -57,7 +57,7 @@ async def mynorm(message: Message):
         return
     norm = get_weekly_norm()
     count = get_user_week_count(message.from_user.id)
-    await message.answer(norm_status_text(message.from_user.username, message.from_user.full_name, count, norm))
+    await message.answer(norm_status_text(message.from_user.id, message.from_user.username, message.from_user.full_name, count, norm))
 
 
 @router.message(F.text == BTN_MY_REST)
@@ -70,17 +70,21 @@ async def myrest(message: Message):
 
     rest = get_rest(message.from_user.id)
     if not rest:
-        await message.answer(rest_status_none(message.from_user.username, message.from_user.full_name))
+        await message.answer(rest_status_none(message.from_user.id, message.from_user.username, message.from_user.full_name))
         return
 
     expires_at = rest["expires_at"]
     if not expires_at:
-        await message.answer(rest_status_infinite(message.from_user.username, message.from_user.full_name, rest["role_name"]))
+        await message.answer(
+            rest_status_infinite(message.from_user.id, message.from_user.username, message.from_user.full_name, rest["role_name"])
+        )
         return
 
     remain = datetime.fromisoformat(expires_at) - datetime.now()
     days = max(0, remain.days)
-    await message.answer(rest_status_with_days(message.from_user.username, message.from_user.full_name, rest["role_name"], days))
+    await message.answer(
+        rest_status_with_days(message.from_user.id, message.from_user.username, message.from_user.full_name, rest["role_name"], days)
+    )
 
 
 @router.message(F.text == BTN_MY_WARNS)
