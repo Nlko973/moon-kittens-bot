@@ -604,13 +604,15 @@ async def cmd_add_admin(message: Message, command: CommandObject):
     if not await require_owner(message):
         return
     if not command.args:
-        await message.answer("Формат: /add_admin <user_id> <имя>")
+        await message.answer("Формат: /add_admin <user_id|@username> [имя]")
         return
     parts = command.args.split(maxsplit=1)
-    if len(parts) < 2 or not parts[0].isdigit():
-        await message.answer("Формат: /add_admin <user_id> <имя>")
+    user_id = await parse_target(parts[0].strip())
+    if not user_id:
+        await message.answer(USER_NOT_FOUND)
         return
-    add_admin(int(parts[0]), parts[1].strip())
+    name = parts[1].strip() if len(parts) > 1 else str(user_id)
+    add_admin(int(user_id), name)
     await message.answer("✅ Админ добавлен.")
 
 
@@ -618,10 +620,14 @@ async def cmd_add_admin(message: Message, command: CommandObject):
 async def cmd_del_admin(message: Message, command: CommandObject):
     if not await require_owner(message):
         return
-    if not command.args or not command.args.strip().isdigit():
-        await message.answer("Формат: /del_admin <user_id>")
+    if not command.args:
+        await message.answer("Формат: /del_admin <user_id|@username>")
         return
-    remove_admin(int(command.args.strip()))
+    user_id = await parse_target(command.args.strip())
+    if not user_id:
+        await message.answer(USER_NOT_FOUND)
+        return
+    remove_admin(int(user_id))
     await message.answer("✅ Админ удален.")
 
 
@@ -644,7 +650,7 @@ async def cmd_say(message: Message, command: CommandObject):
         await message.answer("Формат: /say <текст>")
         return
     try:
-        await bot.send_message(get_group_id(), command.args)
+        await bot.send_message(get_group_id(), command.args, parse_mode=None)
         await message.answer("✅ Отправлено.")
     except TelegramBadRequest as exc:
         await message.answer(f"⚠️ Не удалось отправить сообщение: {exc.message}")
@@ -672,7 +678,7 @@ async def cmd_say_photo(message: Message, command: CommandObject):
         return
 
     try:
-        await bot.send_photo(get_group_id(), photo=file_id, caption=caption)
+        await bot.send_photo(get_group_id(), photo=file_id, caption=caption, parse_mode=None)
         await message.answer("✅ Фото отправлено.")
     except TelegramBadRequest as exc:
         await message.answer(f"⚠️ Не удалось отправить фото: {exc.message}")
@@ -702,7 +708,7 @@ async def cmd_say_gif(message: Message, command: CommandObject):
         return
 
     try:
-        await bot.send_animation(get_group_id(), animation=file_id, caption=caption)
+        await bot.send_animation(get_group_id(), animation=file_id, caption=caption, parse_mode=None)
         await message.answer("✅ GIF отправлен.")
     except TelegramBadRequest as exc:
         await message.answer(f"⚠️ Не удалось отправить GIF: {exc.message}")
@@ -730,7 +736,7 @@ async def cmd_say_video(message: Message, command: CommandObject):
         return
 
     try:
-        await bot.send_video(get_group_id(), video=file_id, caption=caption)
+        await bot.send_video(get_group_id(), video=file_id, caption=caption, parse_mode=None)
         await message.answer("✅ Видео отправлено.")
     except TelegramBadRequest as exc:
         await message.answer(f"⚠️ Не удалось отправить видео: {exc.message}")

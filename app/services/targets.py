@@ -10,4 +10,7 @@ async def parse_target(raw: str) -> Optional[int]:
         return int(raw)
     if raw.startswith("@"):
         return await resolve_user_id_by_username(raw)
+    # Allow username without @ as convenience
+    if re.fullmatch(r"[A-Za-z0-9_]{5,64}", raw):
+        return await resolve_user_id_by_username(raw)
     return None

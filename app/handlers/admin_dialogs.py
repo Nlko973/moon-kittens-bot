@@ -13,7 +13,7 @@ from app.services.duration_parser import parse_deadline, parse_ru_duration_to_mi
 from app.services.moderation import issue_warn, mute_user, unmute_user
 from app.services.targets import parse_target
 from app.texts import USER_NOT_FOUND
-from db import extend_rest, remove_latest_warn_by_user, remove_rest, remove_warn, set_rest_until
+from db import add_admin, extend_rest, remove_admin, remove_latest_warn_by_user, remove_rest, remove_warn, set_rest_until
 
 router = Router()
 
@@ -109,6 +109,22 @@ async def dialog_unwarn_start(message: Message):
     await message.answer("Команда /unwarn: укажите warn_id или пользователя (id/@username). Для отмены: стоп/отмена.")
 
 
+@router.message(F.chat.type == ChatType.PRIVATE, F.text.regexp(r"(?i)^/add_admin(?:@\w+)?(?:\s+.*)?$"))
+async def dialog_add_admin_start(message: Message):
+    if not await require_owner(message):
+        return
+    _start_dialog(message.from_user.id, "add_admin")
+    await message.answer("Команда /add_admin: укажите пользователя (id или @username). Для отмены: стоп/отмена.")
+
+
+@router.message(F.chat.type == ChatType.PRIVATE, F.text.regexp(r"(?i)^/del_admin(?:@\w+)?(?:\s+.*)?$"))
+async def dialog_del_admin_start(message: Message):
+    if not await require_owner(message):
+        return
+    _start_dialog(message.from_user.id, "del_admin")
+    await message.answer("Команда /del_admin: укажите пользователя (id или @username). Для отмены: стоп/отмена.")
+
+
 @router.message(F.chat.type == ChatType.PRIVATE, F.text.regexp(r"(?i)^/say(?:@\w+)?(?:\s+.*)?$"))
 async def dialog_say_start(message: Message):
     if not await require_owner(message):
@@ -185,6 +201,10 @@ async def dialog_input(message: Message):
         await _handle_unban_dialog(message, step, text)
     elif command == "unwarn":
         await _handle_unwarn_dialog(message, step, text)
+    elif command == "add_admin":
+        await _handle_add_admin_dialog(message, step, data, text)
+    elif command == "del_admin":
+        await _handle_del_admin_dialog(message, step, text)
     elif command == "say":
         await _handle_say_dialog(message, step, text)
     elif command == "say_photo":
@@ -209,7 +229,7 @@ async def dialog_photo_input(message: Message):
         _stop_dialog(message.from_user.id)
         return
     file_id = message.photo[-1].file_id
-    await bot.send_photo(get_group_id(), photo=file_id, caption=message.caption)
+    await bot.send_photo(get_group_id(), photo=file_id, caption=message.caption, parse_mode=None)
     _stop_dialog(message.from_user.id)
     await message.answer("✅ Фото отправлено в группу.")
 
@@ -238,7 +258,7 @@ async def dialog_gif_input(message: Message):
         await message.answer("Это не GIF. Отправьте GIF или напишите стоп/отмена.")
         return
 
-    await bot.send_animation(get_group_id(), animation=gif_id, caption=message.caption)
+    await bot.send_animation(get_group_id(), animation=gif_id, caption=message.caption, parse_mode=None)
     _stop_dialog(message.from_user.id)
     await message.answer("✅ GIF отправлен в группу.")
 
@@ -257,7 +277,7 @@ async def dialog_video_input(message: Message):
         _stop_dialog(message.from_user.id)
         return
 
-    await bot.send_video(get_group_id(), video=message.video.file_id, caption=message.caption)
+    await bot.send_video(get_group_id(), video=message.video.file_id, caption=message.caption, parse_mode=None)
     _stop_dialog(message.from_user.id)
     await message.answer("✅ Видео отправлено в группу.")
 
@@ -500,9 +520,41 @@ async def _handle_say_dialog(message: Message, step: int, text: str):
     if step != 0:
         _stop_dialog(message.from_user.id)
         return
-    await bot.send_message(get_group_id(), text)
+    await bot.send_message(get_group_id(), text, parse_mode=None)
     _stop_dialog(message.from_user.id)
     await message.answer("✅ Сообщение отправлено в группу.")
+
+
+async def _handle_add_admin_dialog(message: Message, step: int, data: Dict[str, Any], text: str):
+    if step == 0:
+        user_id = await _parse_user(text)
+        if not user_id:
+            await message.answer(USER_NOT_FOUND)
+            return
+        data["user_id"] = int(user_id)
+        DIALOGS[message.from_user.id]["step"] = 1
+        await message.answer("Укажите имя админа (или '-' чтобы использовать ID).")
+        return
+
+    name = text.strip()
+    if name == "-":
+        name = str(data["user_id"])
+    add_admin(data["user_id"], name)
+    _stop_dialog(message.from_user.id)
+    await message.answer("✅ Админ добавлен.")
+
+
+async def _handle_del_admin_dialog(message: Message, step: int, text: str):
+    if step != 0:
+        _stop_dialog(message.from_user.id)
+        return
+    user_id = await _parse_user(text)
+    if not user_id:
+        await message.answer(USER_NOT_FOUND)
+        return
+    remove_admin(int(user_id))
+    _stop_dialog(message.from_user.id)
+    await message.answer("✅ Админ удален.")
 
 
 
