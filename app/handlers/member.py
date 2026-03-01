@@ -9,7 +9,7 @@ from app.keyboards import BTN_COMPLAINT_CREATE, BTN_COMPLAINT_MINE, BTN_MY_NORM,
 from app.services.chat_settings import get_group_id
 from app.services.access import is_private
 from app.texts import norm_status_text, rest_status_infinite, rest_status_none, rest_status_with_days
-from db import create_complaint, get_rest, get_user_complaints, get_user_warns, get_user_week_count, get_weekly_norm
+from db import count_active_complaints, create_complaint, get_rest, get_user_complaints, get_user_warns, get_user_week_count, get_weekly_norm
 
 router = Router()
 
@@ -29,6 +29,10 @@ def _is_private(message: Message) -> bool:
 async def complaint_start(message: Message):
     if not _is_private(message):
         return
+    active_count = count_active_complaints(message.from_user.id)
+    if active_count >= 3:
+        await message.answer("⚠️ У вас уже 3 активные жалобы. Дождитесь, пока админ закроет хотя бы одну.")
+        return
     AWAITING_COMPLAINT_USERS.add(message.from_user.id)
     await message.answer("Опишите жалобу одним сообщением. Отправьте текст следующим сообщением.")
 
@@ -43,8 +47,17 @@ async def complaint_receive(message: Message):
         await message.answer("Текст жалобы пустой. Напишите жалобу сообщением.")
         return
 
+    active_count = count_active_complaints(message.from_user.id)
+    if active_count >= 3:
+        AWAITING_COMPLAINT_USERS.discard(message.from_user.id)
+        await message.answer("⚠️ У вас уже 3 активные жалобы. Новую сейчас отправить нельзя.")
+        return
+
     AWAITING_COMPLAINT_USERS.remove(message.from_user.id)
     complaint_id = create_complaint(message.from_user.id, message.from_user.username, message.from_user.full_name, text)
+    if complaint_id is None:
+        await message.answer("⚠️ У вас уже 3 активные жалобы. Новую сейчас отправить нельзя.")
+        return
     await message.answer(f"✅ Жалоба принята. Номер: #{complaint_id}")
 
 

@@ -133,7 +133,8 @@ def init_db():
             username TEXT,
             display_name TEXT,
             text TEXT NOT NULL,
-            created_at TEXT
+            created_at TEXT,
+            active INTEGER DEFAULT 1
         )
         """
     )
@@ -143,9 +144,11 @@ def init_db():
     _ensure_column(cur, "users", "inactive_warned_at", "TEXT")
     _ensure_column(cur, "users", "first_seen_at", "TEXT")
     _ensure_column(cur, "warns", "expires_at", "TEXT")
+    _ensure_column(cur, "complaints", "active", "INTEGER DEFAULT 1")
     # Username is not persisted; it is resolved by Telegram ID in runtime.
     cur.execute("UPDATE users SET username = NULL")
     cur.execute("UPDATE complaints SET username = NULL")
+    cur.execute("UPDATE complaints SET active = 1 WHERE active IS NULL")
 
     if get_setting("weekly_norm", cur) is None:
         set_setting("weekly_norm", str(WEEKLY_NORM_DEFAULT), cur)
@@ -832,13 +835,25 @@ def get_expired_mutes(now: Optional[datetime] = None):
 
 # complaints
 
-def create_complaint(user_id: int, username: Optional[str], display_name: str, text: str) -> int:
+def count_active_complaints(user_id: int) -> int:
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("SELECT COUNT(*) AS c FROM complaints WHERE user_id = ? AND active = 1", (user_id,))
+    row = cur.fetchone()
+    conn.close()
+    return int(row["c"] if row else 0)
+
+
+def create_complaint(user_id: int, username: Optional[str], display_name: str, text: str) -> Optional[int]:
+    if count_active_complaints(user_id) >= 3:
+        return None
+
     conn = get_conn()
     cur = conn.cursor()
     cur.execute(
         """
-        INSERT INTO complaints (user_id, username, display_name, text, created_at)
-        VALUES (?, ?, ?, ?, ?)
+        INSERT INTO complaints (user_id, username, display_name, text, created_at, active)
+        VALUES (?, ?, ?, ?, ?, 1)
         """,
         (user_id, None, display_name, text, now_iso()),
     )
@@ -848,33 +863,54 @@ def create_complaint(user_id: int, username: Optional[str], display_name: str, t
     return int(complaint_id)
 
 
-def get_user_complaints(user_id: int):
+def get_user_complaints(user_id: int, active_only: bool = False):
     conn = get_conn()
     cur = conn.cursor()
-    cur.execute(
-        """
-        SELECT id, user_id, username, display_name, text, created_at
-        FROM complaints
-        WHERE user_id = ?
-        ORDER BY id DESC
-        """,
-        (user_id,),
-    )
+    if active_only:
+        cur.execute(
+            """
+            SELECT id, user_id, username, display_name, text, created_at, active
+            FROM complaints
+            WHERE user_id = ? AND active = 1
+            ORDER BY id DESC
+            """,
+            (user_id,),
+        )
+    else:
+        cur.execute(
+            """
+            SELECT id, user_id, username, display_name, text, created_at, active
+            FROM complaints
+            WHERE user_id = ?
+            ORDER BY id DESC
+            """,
+            (user_id,),
+        )
     rows = cur.fetchall()
     conn.close()
     return rows
 
 
-def get_all_complaints():
+def get_all_complaints(active_only: bool = True):
     conn = get_conn()
     cur = conn.cursor()
-    cur.execute(
-        """
-        SELECT id, user_id, username, display_name, text, created_at
-        FROM complaints
-        ORDER BY id DESC
-        """
-    )
+    if active_only:
+        cur.execute(
+            """
+            SELECT id, user_id, username, display_name, text, created_at, active
+            FROM complaints
+            WHERE active = 1
+            ORDER BY id DESC
+            """
+        )
+    else:
+        cur.execute(
+            """
+            SELECT id, user_id, username, display_name, text, created_at, active
+            FROM complaints
+            ORDER BY id DESC
+            """
+        )
     rows = cur.fetchall()
     conn.close()
     return rows
@@ -883,7 +919,7 @@ def get_all_complaints():
 def delete_complaint(complaint_id: int) -> bool:
     conn = get_conn()
     cur = conn.cursor()
-    cur.execute("DELETE FROM complaints WHERE id = ?", (complaint_id,))
+    cur.execute("UPDATE complaints SET active = 0 WHERE id = ? AND active = 1", (complaint_id,))
     changed = cur.rowcount
     conn.commit()
     conn.close()
