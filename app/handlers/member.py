@@ -2,13 +2,16 @@
 
 from aiogram import F, Router
 from aiogram.enums import ChatType
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import Command
 from aiogram.types import Message
 
 from app.keyboards import BTN_COMPLAINT_CREATE, BTN_COMPLAINT_MINE, BTN_MY_NORM, BTN_MY_REST, BTN_MY_WARNS
+from app.runtime import bot
 from app.services.chat_settings import get_group_id
 from app.services.access import is_private
-from app.texts import norm_status_text, rest_status_infinite, rest_status_none, rest_status_with_days
+from app.texts import format_user, norm_status_text, rest_status_infinite, rest_status_none, rest_status_with_days
+from config import OWNER_ID
 from db import count_active_complaints, create_complaint, get_rest, get_user_complaints, get_user_warns, get_user_week_count, get_weekly_norm
 
 router = Router()
@@ -58,6 +61,21 @@ async def complaint_receive(message: Message):
     if complaint_id is None:
         await message.answer("⚠️ У вас уже 3 активные жалобы. Новую сейчас отправить нельзя.")
         return
+
+    owner_notice = (
+        "📩 Новая жалоба\n"
+        f"Номер: #{complaint_id}\n"
+        f"Автор: {format_user(message.from_user.id, message.from_user.username, message.from_user.full_name)} "
+        f"({message.from_user.id})\n"
+        f"Текст: {text}"
+    )
+    try:
+        await bot.send_message(OWNER_ID, owner_notice)
+    except TelegramBadRequest:
+        pass
+    except Exception:
+        pass
+
     await message.answer(f"✅ Жалоба принята. Номер: #{complaint_id}")
 
 
