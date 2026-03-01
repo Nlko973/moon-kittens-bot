@@ -452,6 +452,52 @@ def get_user_brief(user_id: int):
     return row
 
 
+def get_users_from_db(limit: int = 300):
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT user_id, username, display_name, is_member, first_seen_at, last_message_at, updated_at
+        FROM users
+        ORDER BY is_member DESC, COALESCE(updated_at, first_seen_at, '') DESC
+        LIMIT ?
+        """,
+        (limit,),
+    )
+    rows = cur.fetchall()
+    conn.close()
+    return rows
+
+
+def count_users_in_db() -> int:
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("SELECT COUNT(*) AS c FROM users")
+    row = cur.fetchone()
+    conn.close()
+    return int(row["c"] if row else 0)
+
+
+def purge_user_from_db(user_id: int) -> bool:
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("SELECT 1 FROM users WHERE user_id = ? LIMIT 1", (user_id,))
+    existed = cur.fetchone() is not None
+
+    # Remove dependent data first, then user profile.
+    cur.execute("DELETE FROM weekly_stats WHERE user_id = ?", (user_id,))
+    cur.execute("DELETE FROM rests WHERE user_id = ?", (user_id,))
+    cur.execute("DELETE FROM warns WHERE user_id = ?", (user_id,))
+    cur.execute("DELETE FROM mutes WHERE user_id = ?", (user_id,))
+    cur.execute("DELETE FROM complaints WHERE user_id = ?", (user_id,))
+    cur.execute("DELETE FROM admins WHERE user_id = ?", (user_id,))
+    cur.execute("DELETE FROM users WHERE user_id = ?", (user_id,))
+
+    conn.commit()
+    conn.close()
+    return existed
+
+
 def delete_absent_over_30_days() -> int:
     cutoff = (datetime.now() - timedelta(days=30)).isoformat(timespec="seconds")
     conn = get_conn()

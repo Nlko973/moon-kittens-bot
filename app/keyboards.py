@@ -39,6 +39,8 @@ BTN_ADM_PROMPT_SAY = "Написать в чат"
 BTN_ADM_PROMPT_SET_PARAM = "Параметр"
 BTN_ADM_ADD_ADMIN = "Добавить админа"
 BTN_ADM_DEL_ADMIN = "Удалить админа"
+BTN_ADM_DB_USERS = "Участники в БД"
+BTN_ADM_DB_USER_DEL = "Удалить из БД"
 
 
 def private_user_kb(is_admin: bool) -> ReplyKeyboardMarkup:
@@ -70,6 +72,7 @@ def private_admin_panel_kb(is_owner: bool) -> ReplyKeyboardMarkup:
     ]
     if is_owner:
         rows.append([KeyboardButton(text=BTN_ADM_ADD_ADMIN), KeyboardButton(text=BTN_ADM_DEL_ADMIN)])
+        rows.append([KeyboardButton(text=BTN_ADM_DB_USERS), KeyboardButton(text=BTN_ADM_DB_USER_DEL)])
     return ReplyKeyboardMarkup(keyboard=rows, resize_keyboard=True)
 
 

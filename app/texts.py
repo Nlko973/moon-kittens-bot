@@ -29,6 +29,8 @@ ADMIN_HELP = (
     "/warns_user <user>\n"
     "/complaints\n"
     "/del_complaint <id> (владелец)\n"
+    "/db_users (владелец)\n"
+    "/db_user_del <user_id> (владелец)\n"
     "/kick <user> [причина]\n"
     "/ban <user> [причина]\n"
     "/unban <user>\n"

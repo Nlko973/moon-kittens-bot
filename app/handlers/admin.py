@@ -13,6 +13,8 @@ from app.keyboards import (
     BTN_ADM_ADD_ADMIN,
     BTN_ADM_ADMINS,
     BTN_ADM_DEL_ADMIN,
+    BTN_ADM_DB_USERS,
+    BTN_ADM_DB_USER_DEL,
     BTN_ADM_CLEANUP_OFF,
     BTN_ADM_CLEANUP_ON,
     BTN_ADM_CLEANUP_SKIP,
@@ -52,6 +54,7 @@ from app.texts import USER_NOT_FOUND, week_period
 from config import OWNER_ID
 from db import (
     add_admin,
+    count_users_in_db,
     delete_complaint,
     extend_rest,
     get_admins,
@@ -59,6 +62,7 @@ from db import (
     get_all_rests,
     get_all_warns,
     get_all_week_stats,
+    get_users_from_db,
     get_user_warns,
     get_weekly_norm,
     is_cleanup_enabled,
@@ -68,6 +72,7 @@ from db import (
     remove_rest,
     remove_warn,
     remove_latest_warn_by_user,
+    purge_user_from_db,
     set_cleanup_enabled,
     set_cleanup_skip_once,
     set_tg_links_block_enabled,
@@ -784,6 +789,41 @@ async def cmd_show_config(message: Message):
     await message.answer("\n".join(lines))
 
 
+@router.message(Command("db_users"))
+async def cmd_db_users(message: Message):
+    if not await require_owner(message):
+        return
+    rows = get_users_from_db(limit=300)
+    total = count_users_in_db()
+    if not rows:
+        await message.answer("ℹ️ В базе нет участников.")
+        return
+
+    lines = [f"👥 Участники в БД: {total}. Показаны первые {len(rows)}."]
+    for row in rows:
+        user_id = int(row["user_id"])
+        fallback = row["display_name"] or str(user_id)
+        user_label = await resolve_user_label(user_id, fallback)
+        status = "member=1" if int(row["is_member"] or 0) == 1 else "member=0"
+        lines.append(f"{user_label} ({user_id}) • {status}")
+    await message.answer("\n".join(lines))
+
+
+@router.message(Command("db_user_del"))
+async def cmd_db_user_del(message: Message, command: CommandObject):
+    if not await require_owner(message):
+        return
+    if not command.args or not command.args.strip().isdigit():
+        await message.answer("Формат: /db_user_del <user_id>")
+        return
+    user_id = int(command.args.strip())
+    removed = purge_user_from_db(user_id)
+    if removed:
+        await message.answer(f"✅ Пользователь {user_id} удален из БД.")
+    else:
+        await message.answer("⚠️ Пользователь не найден в users. Связанные записи очищены.")
+
+
 @router.message(Command("set_param"))
 async def cmd_set_param(message: Message, command: CommandObject):
     if not await require_owner(message):
@@ -1044,3 +1084,10 @@ async def btn_prompt_del_admin(message: Message):
     if not await require_owner(message):
         return
     await message.answer("Формат: /del_admin <user_id>")
+
+@router.message(F.chat.type == ChatType.PRIVATE, F.text == BTN_ADM_DB_USERS)
+async def btn_db_users(message: Message):
+    await cmd_db_users(message)
+
+
+
