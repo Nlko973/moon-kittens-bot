@@ -109,13 +109,18 @@ async def dialog_unwarn_start(message: Message):
     await message.answer("Команда /unwarn: укажите warn_id или пользователя (id/@username). Для отмены: стоп/отмена.")
 
 
-@router.message(F.chat.type == ChatType.PRIVATE, F.from_user.is_not(None), F.text)
+@router.message(
+    F.chat.type == ChatType.PRIVATE,
+    F.from_user.is_not(None),
+    F.text,
+    F.from_user.func(lambda u: u and u.id in DIALOGS),
+)
 async def dialog_input(message: Message):
-    if not await require_private_admin(message):
-        return
-
     state = DIALOGS.get(message.from_user.id)
     if not state:
+        return
+    if not await require_private_admin(message):
+        _stop_dialog(message.from_user.id)
         return
 
     text = (message.text or "").strip()
