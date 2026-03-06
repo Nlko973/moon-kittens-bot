@@ -283,7 +283,7 @@ async def background_jobs():
             except Exception:
                 logger.exception("Background job failed: daily checks")
 
-        if now.weekday() == 4 and (now.hour > 17 or (now.hour == 17 and now.minute >= 30)):
+        if now.weekday() == 4 and now.hour >= 18:
             today = now.date().isoformat()
             if last_friday_report != today:
                 try:
@@ -309,4 +309,5 @@ async def background_jobs():
                     logger.exception("Background job failed: sunday cleanup")
 
         await asyncio.sleep(30)
+
 
