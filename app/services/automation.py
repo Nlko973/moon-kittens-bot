@@ -85,7 +85,7 @@ def _is_newcomer(first_seen_at: Optional[str], min_days: int = 7) -> bool:
         return False
     try:
         joined_at = datetime.fromisoformat(first_seen_at)
-    except ValueError:
+    except (TypeError, ValueError):
         return False
     return datetime.now() - joined_at < timedelta(days=min_days)
 
@@ -310,3 +310,4 @@ async def background_jobs():
                 logger.exception("Background job failed: daily checks")
 
         await asyncio.sleep(30)
+
