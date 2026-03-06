@@ -264,6 +264,17 @@ async def run_unmute_checks():
             remove_mute(row["user_id"])
 
 
+async def _run_job_with_timeout(coro, timeout_seconds: int, label: str) -> bool:
+    try:
+        await asyncio.wait_for(coro, timeout=timeout_seconds)
+        return True
+    except asyncio.TimeoutError:
+        logger.exception("Background job timed out: %s (%ss)", label, timeout_seconds)
+    except Exception:
+        logger.exception("Background job failed: %s", label)
+    return False
+
+
 async def background_jobs():
     global last_daily_run, last_friday_report
 
@@ -274,16 +285,19 @@ async def background_jobs():
         if now.weekday() == 4 and now.hour >= 18:
             today = now.date().isoformat()
             if last_friday_report != today:
-                try:
-                    await _send_friday_lacking_report()
+                ok = await _run_job_with_timeout(
+                    _send_friday_lacking_report(),
+                    timeout_seconds=120,
+                    label="friday lacking report",
+                )
+                if ok:
                     last_friday_report = today
-                except Exception:
-                    logger.exception("Background job failed: friday lacking report")
 
         if now.weekday() == 6 and now.hour >= 20:
             today = now.date().isoformat()
             if get_last_cleanup_date() != today:
-                try:
+
+                async def _sunday_cleanup_once():
                     group_id = get_group_id()
                     if consume_cleanup_skip_once():
                         await bot.send_message(group_id, "?? Чистка недели пропущена (одноразовый пропуск).")
@@ -293,21 +307,30 @@ async def background_jobs():
                     else:
                         await run_week_cleanup()
                         set_last_cleanup_date(today)
-                except Exception:
-                    logger.exception("Background job failed: sunday cleanup")
 
-        try:
-            await run_unmute_checks()
-        except Exception:
-            logger.exception("Background job failed: run_unmute_checks")
+                await _run_job_with_timeout(
+                    _sunday_cleanup_once(),
+                    timeout_seconds=300,
+                    label="sunday cleanup",
+                )
+
+        await _run_job_with_timeout(
+            run_unmute_checks(),
+            timeout_seconds=60,
+            label="run_unmute_checks",
+        )
 
         if last_daily_run != now.date().isoformat():
-            try:
-                await run_inactivity_checks()
-                delete_absent_over_30_days()
+            ok = await _run_job_with_timeout(
+                run_inactivity_checks(),
+                timeout_seconds=300,
+                label="daily checks",
+            )
+            if ok:
+                try:
+                    delete_absent_over_30_days()
+                except Exception:
+                    logger.exception("Background job failed: delete_absent_over_30_days")
                 last_daily_run = now.date().isoformat()
-            except Exception:
-                logger.exception("Background job failed: daily checks")
 
         await asyncio.sleep(30)
-
