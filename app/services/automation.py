@@ -1,4 +1,5 @@
 ﻿import asyncio
+import logging
 from collections import defaultdict, deque
 from datetime import datetime, timedelta
 from typing import Optional
@@ -38,6 +39,7 @@ join_events = deque()
 raid_mode_until: Optional[datetime] = None
 last_daily_run: Optional[str] = None
 last_friday_report: Optional[str] = None
+logger = logging.getLogger(__name__)
 
 
 async def _send_chunked(chat_id: int, lines: list[str], chunk_limit: int = 3500):
@@ -266,24 +268,34 @@ async def background_jobs():
     global last_daily_run, last_friday_report
 
     while True:
-        try:
-            now = datetime.now()
-            await run_unmute_checks()
+        now = datetime.now()
 
-            if last_daily_run != now.date().isoformat():
+        try:
+            await run_unmute_checks()
+        except Exception:
+            logger.exception("Background job failed: run_unmute_checks")
+
+        if last_daily_run != now.date().isoformat():
+            try:
                 await run_inactivity_checks()
                 delete_absent_over_30_days()
                 last_daily_run = now.date().isoformat()
+            except Exception:
+                logger.exception("Background job failed: daily checks")
 
-            if now.weekday() == 4 and (now.hour > 17 or (now.hour == 17 and now.minute >= 30)):
-                today = now.date().isoformat()
-                if last_friday_report != today:
+        if now.weekday() == 4 and (now.hour > 17 or (now.hour == 17 and now.minute >= 30)):
+            today = now.date().isoformat()
+            if last_friday_report != today:
+                try:
                     await _send_friday_lacking_report()
                     last_friday_report = today
+                except Exception:
+                    logger.exception("Background job failed: friday lacking report")
 
-            if now.weekday() == 6 and now.hour >= 20:
-                today = now.date().isoformat()
-                if get_last_cleanup_date() != today:
+        if now.weekday() == 6 and now.hour >= 20:
+            today = now.date().isoformat()
+            if get_last_cleanup_date() != today:
+                try:
                     group_id = get_group_id()
                     if consume_cleanup_skip_once():
                         await bot.send_message(group_id, "?? Чистка недели пропущена (одноразовый пропуск).")
@@ -293,8 +305,8 @@ async def background_jobs():
                     else:
                         await run_week_cleanup()
                         set_last_cleanup_date(today)
-        except Exception:
-            # Keep background scheduler alive even if a single task iteration fails.
-            pass
+                except Exception:
+                    logger.exception("Background job failed: sunday cleanup")
 
         await asyncio.sleep(30)
+
