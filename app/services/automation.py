@@ -270,19 +270,7 @@ async def background_jobs():
     while True:
         now = datetime.now()
 
-        try:
-            await run_unmute_checks()
-        except Exception:
-            logger.exception("Background job failed: run_unmute_checks")
-
-        if last_daily_run != now.date().isoformat():
-            try:
-                await run_inactivity_checks()
-                delete_absent_over_30_days()
-                last_daily_run = now.date().isoformat()
-            except Exception:
-                logger.exception("Background job failed: daily checks")
-
+        # Time-sensitive reports first, so long daily checks don't delay them.
         if now.weekday() == 4 and now.hour >= 18:
             today = now.date().isoformat()
             if last_friday_report != today:
@@ -308,6 +296,17 @@ async def background_jobs():
                 except Exception:
                     logger.exception("Background job failed: sunday cleanup")
 
+        try:
+            await run_unmute_checks()
+        except Exception:
+            logger.exception("Background job failed: run_unmute_checks")
+
+        if last_daily_run != now.date().isoformat():
+            try:
+                await run_inactivity_checks()
+                delete_absent_over_30_days()
+                last_daily_run = now.date().isoformat()
+            except Exception:
+                logger.exception("Background job failed: daily checks")
+
         await asyncio.sleep(30)
-
-
