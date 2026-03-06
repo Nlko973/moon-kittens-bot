@@ -101,7 +101,15 @@ async def _send_friday_lacking_report():
     lines = [f"?? Список без нормы ({week_period(datetime.now())}):"]
     for row in lacking[:80]:
         newcomer_mark = " (новичок < 7 дней)" if _is_newcomer(row["first_seen_at"]) else ""
-        user_label = await resolve_user_label(row["user_id"], row["display_name"])
+        fallback = row["display_name"] or str(row["user_id"])
+        try:
+            # Don't block whole report on slow Telegram profile lookup.
+            user_label = await asyncio.wait_for(
+                resolve_user_label(row["user_id"], row["display_name"]),
+                timeout=0.35,
+            )
+        except Exception:
+            user_label = fallback
         lines.append(f"- {user_label}: {row['count']}/{norm}{newcomer_mark}")
     await _send_chunked(get_group_id(), lines)
 
@@ -334,3 +342,5 @@ async def background_jobs():
                 last_daily_run = now.date().isoformat()
 
         await asyncio.sleep(30)
+
+
