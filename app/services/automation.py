@@ -275,13 +275,13 @@ async def background_jobs():
                 delete_absent_over_30_days()
                 last_daily_run = now.date().isoformat()
 
-            if now.weekday() == 4 and now.hour >= 12:
+            if now.weekday() == 4 and now.hour == 16 and now.minute == 0:
                 today = now.date().isoformat()
                 if last_friday_report != today:
                     await _send_friday_lacking_report()
                     last_friday_report = today
 
-            if now.weekday() == 6 and now.hour >= 23 and now.minute >= 55:
+            if now.weekday() == 6 and now.hour == 20 and now.minute == 0:
                 today = now.date().isoformat()
                 if get_last_cleanup_date() != today:
                     group_id = get_group_id()
