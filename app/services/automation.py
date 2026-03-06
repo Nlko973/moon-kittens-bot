@@ -101,22 +101,28 @@ async def _send_friday_lacking_report():
     if not lacking:
         await bot.send_message(
             get_group_id(),
-            (`r`n                "<b>Friday norm report</b>\n"`r`n                f"Period: {period}\n"`r`n                f"Norm: <b>{norm}</b>\n"`r`n                f"Members tracked: <b>{total}</b>\n"`r`n                "All members reached weekly norm."`r`n            ),
+            (
+                "📊 <b>Пятничный отчет по норме</b>\n"
+                f"Период: {period}\n"
+                f"Норма: <b>{norm}</b>\n"
+                f"Участников в учете: <b>{total}</b>\n"
+                "🎉 У всех есть недельная норма."
+            ),
         )
         return
 
     lines = [
-        "<b>Friday norm report</b>",
-        f"Period: {period}",
-        f"Norm: <b>{norm}</b>",
-        f"Members tracked: <b>{total}</b>",
-        f"With norm: <b>{ok_count}</b>",
-        f"Without norm: <b>{len(lacking)}</b>",
+        "📊 <b>Пятничный отчет по норме</b>",
+        f"Период: {period}",
+        f"Норма: <b>{norm}</b>",
+        f"Участников в учете: <b>{total}</b>",
+        f"С нормой: <b>{ok_count}</b>",
+        f"Без нормы: <b>{len(lacking)}</b>",
         "",
-        "<b>Without norm:</b>",
+        "<b>Без нормы:</b>",
     ]
     for idx, row in enumerate(lacking[:80], start=1):
-        newcomer_mark = " (newcomer under 7 days)" if _is_newcomer(row["first_seen_at"]) else ""
+        newcomer_mark = " · новичок (меньше 7 дней)" if _is_newcomer(row["first_seen_at"]) else ""
         fallback = row["display_name"] or str(row["user_id"])
         try:
             # Don't block whole report on slow Telegram profile lookup.
@@ -129,7 +135,6 @@ async def _send_friday_lacking_report():
         lines.append(f"{idx}. {user_label} - <b>{row['count']}/{norm}</b>{newcomer_mark}")
 
     await _send_chunked(get_group_id(), lines)
-
 
 def register_join_event() -> bool:
     global raid_mode_until
@@ -360,6 +365,7 @@ async def background_jobs():
                 last_daily_run = now.date().isoformat()
 
         await asyncio.sleep(30)
+
 
 
 
