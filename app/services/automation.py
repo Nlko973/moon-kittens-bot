@@ -100,7 +100,7 @@ async def _send_friday_lacking_report():
 
     lines = [f"?? Список без нормы ({week_period(datetime.now())}):"]
     for row in lacking[:80]:
-        newcomer_mark = " (новичок < 7 дней)" if _is_newcomer(row["first_seen_at"]) else ""
+        newcomer_mark = " (новичок меньше 7 дней)" if _is_newcomer(row["first_seen_at"]) else ""
         fallback = row["display_name"] or str(row["user_id"])
         try:
             # Don't block whole report on slow Telegram profile lookup.
@@ -200,7 +200,7 @@ async def run_week_cleanup():
             user_label = await resolve_user_label(row["user_id"], row["display_name"])
             lines.append(f"- #{warn_id} {user_label}: {row['count']}/{norm}")
         if skipped_newcomers:
-            lines.append(f"Новички (<7 дней) без варна: {len(skipped_newcomers)}.")
+            lines.append(f"Новички (меньше 7 дней) без варна: {len(skipped_newcomers)}.")
         await _send_chunked(group_id, lines)
     else:
         extra = ""
@@ -213,7 +213,7 @@ async def run_week_cleanup():
         f"Норма: {norm}",
         f"Всего участников в учете: {len(rows)}",
         f"Выдано варнов: {len(punished)}",
-        f"Пропущено новичков (<7 дней): {len(skipped_newcomers)}",
+        f"Пропущено новичков (меньше 7 дней): {len(skipped_newcomers)}",
     ]
     if punished:
         owner_lines.append("Список с варнами:")
@@ -343,5 +343,6 @@ async def background_jobs():
                 last_daily_run = now.date().isoformat()
 
         await asyncio.sleep(30)
+
 
 
