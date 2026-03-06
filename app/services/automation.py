@@ -13,7 +13,7 @@ from app.services.bot_config import get_int_param
 from app.services.chat_settings import get_group_id
 from app.services.moderation import issue_warn, mute_user, unmute_user
 from app.services.user_identity import remember_user, resolve_user_label
-from app.texts import week_period
+from app.texts import format_user, week_period
 from config import OWNER_ID
 from db import (
     add_message,
@@ -109,7 +109,7 @@ async def _send_friday_lacking_report():
                 timeout=0.35,
             )
         except Exception:
-            user_label = fallback
+            user_label = format_user(row["user_id"], None, fallback)
         lines.append(f"- {user_label}: {row['count']}/{norm}{newcomer_mark}")
     await _send_chunked(get_group_id(), lines)
 
@@ -132,7 +132,7 @@ def register_join_event() -> bool:
 
 
 async def add_message_and_guard(message: Message):
-    global raid_mode_until, last_friday_report
+    global raid_mode_until
     spam_window_seconds = get_int_param("spam_window_seconds")
     spam_limit_count = get_int_param("spam_limit_count")
     spam_mute_minutes = get_int_param("spam_mute_minutes")
@@ -147,16 +147,6 @@ async def add_message_and_guard(message: Message):
 
     now = datetime.now()
 
-    # Fallback trigger: if background scheduler is delayed, first Friday message
-    # after 18:00 still forces report delivery once per day.
-    if now.weekday() == 4 and now.hour >= 18:
-        today = now.date().isoformat()
-        if last_friday_report != today:
-            try:
-                await _send_friday_lacking_report()
-                last_friday_report = today
-            except Exception:
-                logger.exception("Friday report fallback failed from message handler")
     bucket = spam_buckets[user.id]
     bucket.append(now)
     while bucket and (now - bucket[0]).total_seconds() > spam_window_seconds:
