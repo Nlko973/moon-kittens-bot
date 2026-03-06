@@ -132,7 +132,7 @@ def register_join_event() -> bool:
 
 
 async def add_message_and_guard(message: Message):
-    global raid_mode_until
+    global raid_mode_until, last_friday_report
     spam_window_seconds = get_int_param("spam_window_seconds")
     spam_limit_count = get_int_param("spam_limit_count")
     spam_mute_minutes = get_int_param("spam_mute_minutes")
@@ -146,6 +146,17 @@ async def add_message_and_guard(message: Message):
         return
 
     now = datetime.now()
+
+    # Fallback trigger: if background scheduler is delayed, first Friday message
+    # after 18:00 still forces report delivery once per day.
+    if now.weekday() == 4 and now.hour >= 18:
+        today = now.date().isoformat()
+        if last_friday_report != today:
+            try:
+                await _send_friday_lacking_report()
+                last_friday_report = today
+            except Exception:
+                logger.exception("Friday report fallback failed from message handler")
     bucket = spam_buckets[user.id]
     bucket.append(now)
     while bucket and (now - bucket[0]).total_seconds() > spam_window_seconds:
