@@ -452,6 +452,20 @@ def get_user_brief(user_id: int):
     return row
 
 
+def user_exists_in_db(user_id: int, members_only: bool = False) -> bool:
+    conn = get_conn()
+    cur = conn.cursor()
+    query = "SELECT 1 FROM users WHERE user_id = ?"
+    params: list[object] = [user_id]
+    if members_only:
+        query += " AND is_member = 1"
+    query += " LIMIT 1"
+    cur.execute(query, params)
+    exists = cur.fetchone() is not None
+    conn.close()
+    return exists
+
+
 def get_users_from_db(limit: int = 300):
     conn = get_conn()
     cur = conn.cursor()
@@ -919,6 +933,8 @@ def count_active_complaints(user_id: int) -> int:
 
 
 def create_complaint(user_id: int, username: Optional[str], display_name: str, text: str) -> Optional[int]:
+    if not user_exists_in_db(user_id):
+        return None
     if count_active_complaints(user_id) >= 3:
         return None
 

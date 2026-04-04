@@ -12,7 +12,7 @@ from app.services.chat_settings import get_group_id
 from app.services.access import is_private
 from app.texts import format_user, norm_status_text, rest_status_infinite, rest_status_none, rest_status_with_days
 from config import OWNER_ID
-from db import count_active_complaints, create_complaint, get_rest, get_user_complaints, get_user_warns, get_user_week_count, get_weekly_norm
+from db import count_active_complaints, create_complaint, get_rest, get_user_complaints, get_user_warns, get_user_week_count, get_weekly_norm, user_exists_in_db
 
 router = Router()
 
@@ -32,6 +32,9 @@ def _is_private(message: Message) -> bool:
 async def complaint_start(message: Message):
     if not _is_private(message):
         return
+    if not user_exists_in_db(message.from_user.id):
+        await message.answer("⚠️ Жалобу могут отправлять только участники, которые есть в базе бота.")
+        return
     active_count = count_active_complaints(message.from_user.id)
     if active_count >= 3:
         await message.answer("⚠️ У вас уже 3 активные жалобы. Дождитесь, пока админ закроет хотя бы одну.")
@@ -43,6 +46,11 @@ async def complaint_start(message: Message):
 @router.message(F.chat.type == ChatType.PRIVATE, F.from_user.is_not(None), F.text, F.from_user.func(lambda u: u and u.id in AWAITING_COMPLAINT_USERS))
 async def complaint_receive(message: Message):
     if message.from_user.id not in AWAITING_COMPLAINT_USERS:
+        return
+
+    if not user_exists_in_db(message.from_user.id):
+        AWAITING_COMPLAINT_USERS.discard(message.from_user.id)
+        await message.answer("⚠️ Жалобу могут отправлять только участники, которые есть в базе бота.")
         return
 
     text = message.text.strip()
@@ -59,7 +67,10 @@ async def complaint_receive(message: Message):
     AWAITING_COMPLAINT_USERS.remove(message.from_user.id)
     complaint_id = create_complaint(message.from_user.id, message.from_user.username, message.from_user.full_name, text)
     if complaint_id is None:
-        await message.answer("⚠️ У вас уже 3 активные жалобы. Новую сейчас отправить нельзя.")
+        if not user_exists_in_db(message.from_user.id):
+            await message.answer("⚠️ Жалобу могут отправлять только участники, которые есть в базе бота.")
+        else:
+            await message.answer("⚠️ У вас уже 3 активные жалобы. Новую сейчас отправить нельзя.")
         return
 
     owner_notice = (

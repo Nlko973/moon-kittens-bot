@@ -273,7 +273,12 @@ async def run_inactivity_checks():
     for row in to_warn:
         if row["inactive_warned_at"]:
             continue
-        warn_id, _total, _third, _expires_at = await issue_warn(row["user_id"], 0, "Неактив 10 дней", "inactive")
+        warn_id, _total, _third, _expires_at = await issue_warn(
+            row["user_id"],
+            0,
+            f"\u041d\u0435\u0430\u043a\u0442\u0438\u0432 {inactivity_warn_days} \u0434\u043d\u0435\u0439",
+            "inactive",
+        )
         mark_inactive_warned(row["user_id"])
         user_tag = await resolve_user_label(row["user_id"], row["display_name"])
         await bot.send_message(group_id, f"?? {user_tag} — выдан варн за неактив (#{warn_id}).")
