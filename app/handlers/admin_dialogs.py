@@ -17,6 +17,7 @@ from app.keyboards import (
     BTN_ADM_PROMPT_MUTE,
     BTN_ADM_PROMPT_REST,
     BTN_ADM_PROMPT_SAY,
+    BTN_ADM_PROMPT_SET_PARAM,
     BTN_ADM_PROMPT_UNBAN,
     BTN_ADM_PROMPT_UNMUTE,
     BTN_ADM_PROMPT_UNREST,
@@ -24,6 +25,7 @@ from app.keyboards import (
     BTN_ADM_PROMPT_WARN,
 )
 from app.services.access import require_owner, require_private_admin
+from app.services.bot_config import PARAM_DEFAULTS
 from app.services.chat_settings import get_group_id
 from app.services.duration_parser import parse_deadline, parse_ru_duration_to_minutes
 from app.services.moderation import issue_warn, mute_user, unmute_user
@@ -234,6 +236,16 @@ async def btn_dialog_del_complaint_start(message: Message):
 @router.message(F.chat.type == ChatType.PRIVATE, F.text == BTN_ADM_DB_USER_DEL)
 async def btn_dialog_db_user_del_start(message: Message):
     await _start_admin_dialog(message, "db_user_del", owner_only=True)
+
+
+@router.message(F.chat.type == ChatType.PRIVATE, F.text == BTN_ADM_PROMPT_SET_PARAM)
+@router.message(F.chat.type == ChatType.PRIVATE, F.text == "\u041f\u0430\u0440\u0430\u043c\u0435\u0442\u0440")
+async def btn_prompt_set_param(message: Message):
+    if not await require_owner(message):
+        return
+    _stop_dialog(message.from_user.id)
+    names = ", ".join(PARAM_DEFAULTS.keys())
+    await message.answer(f"??????: /set_param <name> <value>\n????????? name: {names}")
 
 
 @router.message(
