@@ -531,6 +531,7 @@ def delete_absent_over_30_days() -> int:
     cur.execute(f"DELETE FROM rests WHERE user_id IN ({placeholders})", user_ids)
     cur.execute(f"DELETE FROM warns WHERE user_id IN ({placeholders})", user_ids)
     cur.execute(f"DELETE FROM mutes WHERE user_id IN ({placeholders})", user_ids)
+    cur.execute(f"DELETE FROM complaints WHERE user_id IN ({placeholders})", user_ids)
     cur.execute(f"DELETE FROM users WHERE user_id IN ({placeholders})", user_ids)
 
     conn.commit()

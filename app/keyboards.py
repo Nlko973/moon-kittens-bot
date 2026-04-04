@@ -67,10 +67,10 @@ def private_admin_panel_kb(is_owner: bool) -> ReplyKeyboardMarkup:
         [KeyboardButton(text=BTN_ADM_PROMPT_REST), KeyboardButton(text=BTN_ADM_PROMPT_UNREST)],
         [KeyboardButton(text=BTN_ADM_PROMPT_MUTE), KeyboardButton(text=BTN_ADM_PROMPT_UNMUTE)],
         [KeyboardButton(text=BTN_ADM_PROMPT_BAN), KeyboardButton(text=BTN_ADM_PROMPT_UNBAN), KeyboardButton(text=BTN_ADM_PROMPT_KICK)],
-        [KeyboardButton(text=BTN_ADM_PROMPT_SAY), KeyboardButton(text=BTN_ADM_PROMPT_SET_PARAM)],
         [KeyboardButton(text=BTN_ADM_SHOW_CONFIG), KeyboardButton(text=BTN_MENU)],
     ]
     if is_owner:
+        rows.append([KeyboardButton(text=BTN_ADM_PROMPT_SAY), KeyboardButton(text=BTN_ADM_PROMPT_SET_PARAM)])
         rows.append([KeyboardButton(text=BTN_ADM_ADD_ADMIN), KeyboardButton(text=BTN_ADM_DEL_ADMIN)])
         rows.append([KeyboardButton(text=BTN_ADM_DB_USERS), KeyboardButton(text=BTN_ADM_DB_USER_DEL)])
     return ReplyKeyboardMarkup(keyboard=rows, resize_keyboard=True)

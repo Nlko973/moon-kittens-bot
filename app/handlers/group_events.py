@@ -263,6 +263,7 @@ async def on_group_message(message: Message):
                 0,
                 "Ссылка на Telegram-канал (запрещено)",
                 "tg_link",
+                duration_minutes=60 * 24 * 30,
             )
             await message.answer(f"⚠️ Ссылка запрещена. Выдан варн #{warn_id}. Активных варнов: {total}.")
             return

@@ -56,30 +56,6 @@ async def _send_chunked(chat_id: int, lines: list[str], chunk_limit: int = 3500)
         await bot.send_message(chat_id, chunk)
 
 
-async def _send_pre_cleanup_report_to_owner(rows, norm: int):
-    lacking = [row for row in rows if row["count"] < norm]
-    ok = len(rows) - len(lacking)
-    lines = [
-        f"?? Предчистка: {week_period(datetime.now())}",
-        f"Норма: {norm}",
-        f"Участников в учете: {len(rows)}",
-        f"С нормой: {ok}",
-        f"Без нормы: {len(lacking)}",
-        "Список без нормы:",
-    ]
-    if lacking:
-        for row in lacking[:200]:
-            user_label = await resolve_user_label(row["user_id"], row["display_name"])
-            lines.append(f"- {user_label}: {row['count']}/{norm}")
-    else:
-        lines.append("- Нет нарушителей")
-
-    try:
-        await _send_chunked(OWNER_ID, lines)
-    except TelegramBadRequest:
-        pass
-
-
 def _is_newcomer(first_seen_at: Optional[str], min_days: int = 7) -> bool:
     if not first_seen_at:
         return False
@@ -194,11 +170,9 @@ async def run_week_cleanup():
     norm = get_weekly_norm()
     rows = get_cleanup_candidates()
 
-    await _send_pre_cleanup_report_to_owner(rows, norm)
-
     punished = []
     skipped_newcomers = []
-    cleanup_warn_minutes = get_int_param("cleanup_warn_duration_minutes")
+    auto_warn_minutes = 60 * 24 * 30
 
     for row in rows:
         if row["count"] >= norm:
@@ -212,7 +186,7 @@ async def run_week_cleanup():
             0,
             "Нет недельной нормы",
             "norma",
-            duration_minutes=cleanup_warn_minutes,
+            duration_minutes=auto_warn_minutes,
         )
         punished.append((row, warn_id))
 
@@ -256,7 +230,7 @@ async def run_inactivity_checks():
 
     to_notice = get_inactive_candidates(inactivity_notice_days)
     for row in to_notice:
-        if row["inactive_notice_at"]:
+        if row["inactive_notice_at"] or row["inactive_warned_at"]:
             continue
         user_tag = await resolve_user_label(row["user_id"], row["display_name"])
         await bot.send_message(
@@ -278,6 +252,7 @@ async def run_inactivity_checks():
             0,
             f"\u041d\u0435\u0430\u043a\u0442\u0438\u0432 {inactivity_warn_days} \u0434\u043d\u0435\u0439",
             "inactive",
+            duration_minutes=60 * 24 * 30,
         )
         mark_inactive_warned(row["user_id"])
         user_tag = await resolve_user_label(row["user_id"], row["display_name"])
