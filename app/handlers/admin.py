@@ -1065,6 +1065,7 @@ async def btn_prompt_say(message: Message):
 
 
 @router.message(F.chat.type == ChatType.PRIVATE, F.text == BTN_ADM_PROMPT_SET_PARAM)
+@router.message(F.chat.type == ChatType.PRIVATE, F.text == "????????")
 async def btn_prompt_set_param(message: Message):
     if not await require_owner(message):
         return
