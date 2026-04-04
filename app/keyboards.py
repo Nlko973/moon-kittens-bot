@@ -47,7 +47,8 @@ def private_user_kb(is_admin: bool) -> ReplyKeyboardMarkup:
     rows = [
         [KeyboardButton(text=BTN_MY_NORM), KeyboardButton(text=BTN_MY_WARNS)],
         [KeyboardButton(text=BTN_MY_REST), KeyboardButton(text=BTN_COMPLAINT_CREATE)],
-        [KeyboardButton(text=BTN_COMPLAINT_MINE), KeyboardButton(text=BTN_MENU)],
+        [KeyboardButton(text=BTN_COMPLAINT_MINE), KeyboardButton(text=BTN_OWNER_MSG_CREATE)],
+        [KeyboardButton(text=BTN_OWNER_MSG_MINE), KeyboardButton(text=BTN_MENU)],
     ]
     if is_admin:
         rows.append([KeyboardButton(text=BTN_ADMIN_PANEL)])
@@ -59,6 +60,7 @@ def private_admin_panel_kb(is_owner: bool) -> ReplyKeyboardMarkup:
         [KeyboardButton(text=BTN_ADM_NORM_STATS), KeyboardButton(text=BTN_ADM_WARNS_ALL)],
         [KeyboardButton(text=BTN_ADM_RESTS), KeyboardButton(text=BTN_ADM_ADMINS)],
         [KeyboardButton(text=BTN_ADM_COMPLAINTS), KeyboardButton(text=BTN_ADM_COMPLAINT_DEL)],
+        [KeyboardButton(text=BTN_ADM_OWNER_MSGS), KeyboardButton(text=BTN_ADM_OWNER_MSG_DEL)],
         [KeyboardButton(text=BTN_ADM_CLEANUP_ON), KeyboardButton(text=BTN_ADM_CLEANUP_OFF), KeyboardButton(text=BTN_ADM_CLEANUP_SKIP)],
         [KeyboardButton(text=BTN_ADM_CLEANUP_WHEN)],
         [KeyboardButton(text=BTN_ADM_TG_LINKS_ON), KeyboardButton(text=BTN_ADM_TG_LINKS_OFF), KeyboardButton(text=BTN_ADM_TG_LINKS_STATUS)],

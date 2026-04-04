@@ -10,6 +10,7 @@ from app.runtime import bot
 from app.keyboards import (
     BTN_ADM_ADD_ADMIN,
     BTN_ADM_COMPLAINT_DEL,
+    BTN_ADM_OWNER_MSG_DEL,
     BTN_ADM_DB_USER_DEL,
     BTN_ADM_DEL_ADMIN,
     BTN_ADM_PROMPT_BAN,
@@ -31,7 +32,7 @@ from app.services.duration_parser import parse_deadline, parse_ru_duration_to_mi
 from app.services.moderation import issue_warn, mute_user, unmute_user
 from app.services.targets import parse_target
 from app.texts import USER_NOT_FOUND
-from db import add_admin, delete_complaint, extend_rest, purge_user_from_db, remove_admin, remove_latest_warn_by_user, remove_rest, remove_warn, set_rest_until
+from db import add_admin, delete_complaint, delete_owner_message, extend_rest, purge_user_from_db, remove_admin, remove_latest_warn_by_user, remove_rest, remove_warn, set_rest_until
 
 router = Router()
 
@@ -148,6 +149,11 @@ async def dialog_db_user_del_start(message: Message):
     await _start_admin_dialog(message, "db_user_del", owner_only=True)
 
 
+@router.message(F.chat.type == ChatType.PRIVATE, F.text.regexp(r"(?i)^/del_owner_msg(?:@\w+)?\s*$"))
+async def dialog_del_owner_msg_start(message: Message):
+    await _start_admin_dialog(message, "del_owner_msg", owner_only=True)
+
+
 @router.message(F.chat.type == ChatType.PRIVATE, F.text.regexp(r"(?i)^/say(?:@\w+)?\s*$"))
 async def dialog_say_start(message: Message):
     await _start_admin_dialog(message, "say_any", owner_only=True)
@@ -238,6 +244,11 @@ async def btn_dialog_db_user_del_start(message: Message):
     await _start_admin_dialog(message, "db_user_del", owner_only=True)
 
 
+@router.message(F.chat.type == ChatType.PRIVATE, F.text == BTN_ADM_OWNER_MSG_DEL)
+async def btn_dialog_del_owner_msg_start(message: Message):
+    await _start_admin_dialog(message, "del_owner_msg", owner_only=True)
+
+
 @router.message(F.chat.type == ChatType.PRIVATE, F.text == BTN_ADM_PROMPT_SET_PARAM)
 @router.message(F.chat.type == ChatType.PRIVATE, F.text == "\u041f\u0430\u0440\u0430\u043c\u0435\u0442\u0440")
 async def btn_prompt_set_param(message: Message):
@@ -298,6 +309,8 @@ async def dialog_input(message: Message):
         await _handle_del_admin_dialog(message, step, text)
     elif command == "del_complaint":
         await _handle_del_complaint_dialog(message, step, text)
+    elif command == "del_owner_msg":
+        await _handle_del_owner_msg_dialog(message, step, text)
     elif command == "db_user_del":
         await _handle_db_user_del_dialog(message, step, text)
     elif command == "say":
@@ -722,6 +735,23 @@ async def _handle_del_complaint_dialog(message: Message, step: int, text: str):
         await message.answer("✅ Жалоба помечена как неактивная.")
     else:
         await message.answer("⚠️ Активная жалоба с таким ID не найдена.")
+
+
+async def _handle_del_owner_msg_dialog(message: Message, step: int, text: str):
+    if step != 0:
+        _stop_dialog(message.from_user.id)
+        return
+    raw = text.strip()
+    if not raw.isdigit():
+        await message.answer("Укажите числовой ID сообщения влд.")
+        return
+    owner_message_id = int(raw)
+    changed = delete_owner_message(owner_message_id)
+    _stop_dialog(message.from_user.id)
+    if changed:
+        await message.answer("✅ Сообщение влд помечено как неактивное.")
+    else:
+        await message.answer("⚠️ Активное сообщение влд с таким ID не найдено.")
 
 
 async def _handle_db_user_del_dialog(message: Message, step: int, text: str):

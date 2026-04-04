@@ -139,16 +139,33 @@ def init_db():
         """
     )
 
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS owner_messages (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            username TEXT,
+            display_name TEXT,
+            text TEXT NOT NULL,
+            created_at TEXT,
+            active INTEGER DEFAULT 1
+        )
+        """
+    )
+
     # Migration from old schema
     _ensure_column(cur, "users", "inactive_notice_at", "TEXT")
     _ensure_column(cur, "users", "inactive_warned_at", "TEXT")
     _ensure_column(cur, "users", "first_seen_at", "TEXT")
     _ensure_column(cur, "warns", "expires_at", "TEXT")
     _ensure_column(cur, "complaints", "active", "INTEGER DEFAULT 1")
+    _ensure_column(cur, "owner_messages", "active", "INTEGER DEFAULT 1")
     # Username is not persisted; it is resolved by Telegram ID in runtime.
     cur.execute("UPDATE users SET username = NULL")
     cur.execute("UPDATE complaints SET username = NULL")
     cur.execute("UPDATE complaints SET active = 1 WHERE active IS NULL")
+    cur.execute("UPDATE owner_messages SET username = NULL")
+    cur.execute("UPDATE owner_messages SET active = 1 WHERE active IS NULL")
 
     if get_setting("weekly_norm", cur) is None:
         set_setting("weekly_norm", str(WEEKLY_NORM_DEFAULT), cur)
@@ -504,6 +521,7 @@ def purge_user_from_db(user_id: int) -> bool:
     cur.execute("DELETE FROM warns WHERE user_id = ?", (user_id,))
     cur.execute("DELETE FROM mutes WHERE user_id = ?", (user_id,))
     cur.execute("DELETE FROM complaints WHERE user_id = ?", (user_id,))
+    cur.execute("DELETE FROM owner_messages WHERE user_id = ?", (user_id,))
     cur.execute("DELETE FROM admins WHERE user_id = ?", (user_id,))
     cur.execute("DELETE FROM users WHERE user_id = ?", (user_id,))
 
@@ -532,6 +550,7 @@ def delete_absent_over_30_days() -> int:
     cur.execute(f"DELETE FROM warns WHERE user_id IN ({placeholders})", user_ids)
     cur.execute(f"DELETE FROM mutes WHERE user_id IN ({placeholders})", user_ids)
     cur.execute(f"DELETE FROM complaints WHERE user_id IN ({placeholders})", user_ids)
+    cur.execute(f"DELETE FROM owner_messages WHERE user_id IN ({placeholders})", user_ids)
     cur.execute(f"DELETE FROM users WHERE user_id IN ({placeholders})", user_ids)
 
     conn.commit()
@@ -1011,6 +1030,101 @@ def delete_complaint(complaint_id: int) -> bool:
     conn = get_conn()
     cur = conn.cursor()
     cur.execute("UPDATE complaints SET active = 0 WHERE id = ? AND active = 1", (complaint_id,))
+    changed = cur.rowcount
+    conn.commit()
+    conn.close()
+    return changed > 0
+
+
+# owner messages
+
+def count_active_owner_messages(user_id: int) -> int:
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("SELECT COUNT(*) AS c FROM owner_messages WHERE user_id = ? AND active = 1", (user_id,))
+    row = cur.fetchone()
+    conn.close()
+    return int(row["c"] if row else 0)
+
+
+def create_owner_message(user_id: int, username: Optional[str], display_name: str, text: str) -> Optional[int]:
+    if not user_exists_in_db(user_id):
+        return None
+    if count_active_owner_messages(user_id) >= 3:
+        return None
+
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        INSERT INTO owner_messages (user_id, username, display_name, text, created_at, active)
+        VALUES (?, ?, ?, ?, ?, 1)
+        """,
+        (user_id, None, display_name, text, now_iso()),
+    )
+    owner_message_id = cur.lastrowid
+    conn.commit()
+    conn.close()
+    return int(owner_message_id)
+
+
+def get_user_owner_messages(user_id: int, active_only: bool = False):
+    conn = get_conn()
+    cur = conn.cursor()
+    if active_only:
+        cur.execute(
+            """
+            SELECT id, user_id, username, display_name, text, created_at, active
+            FROM owner_messages
+            WHERE user_id = ? AND active = 1
+            ORDER BY id DESC
+            """,
+            (user_id,),
+        )
+    else:
+        cur.execute(
+            """
+            SELECT id, user_id, username, display_name, text, created_at, active
+            FROM owner_messages
+            WHERE user_id = ?
+            ORDER BY id DESC
+            """,
+            (user_id,),
+        )
+    rows = cur.fetchall()
+    conn.close()
+    return rows
+
+
+def get_all_owner_messages(active_only: bool = True):
+    conn = get_conn()
+    cur = conn.cursor()
+    if active_only:
+        cur.execute(
+            """
+            SELECT id, user_id, username, display_name, text, created_at, active
+            FROM owner_messages
+            WHERE active = 1
+            ORDER BY id DESC
+            """
+        )
+    else:
+        cur.execute(
+            """
+            SELECT id, user_id, username, display_name, text, created_at, active
+            FROM owner_messages
+            ORDER BY id DESC
+            """
+        )
+    rows = cur.fetchall()
+    conn.close()
+    return rows
+
+
+def delete_owner_message(owner_message_id: int) -> bool:
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("UPDATE owner_messages SET active = 0 WHERE id = ? AND active = 1", (owner_message_id,))
     changed = cur.rowcount
     conn.commit()
     conn.close()

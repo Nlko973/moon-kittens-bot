@@ -6,17 +6,18 @@ from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import Command
 from aiogram.types import Message
 
-from app.keyboards import BTN_COMPLAINT_CREATE, BTN_COMPLAINT_MINE, BTN_MY_NORM, BTN_MY_REST, BTN_MY_WARNS
+from app.keyboards import BTN_COMPLAINT_CREATE, BTN_COMPLAINT_MINE, BTN_MY_NORM, BTN_MY_REST, BTN_MY_WARNS, BTN_OWNER_MSG_CREATE, BTN_OWNER_MSG_MINE
 from app.runtime import bot
 from app.services.chat_settings import get_group_id
 from app.services.access import is_private
 from app.texts import format_user, norm_status_text, rest_status_infinite, rest_status_none, rest_status_with_days
 from config import OWNER_ID
-from db import count_active_complaints, create_complaint, get_rest, get_user_complaints, get_user_warns, get_user_week_count, get_weekly_norm, user_exists_in_db
+from db import count_active_complaints, count_active_owner_messages, create_complaint, create_owner_message, get_rest, get_user_complaints, get_user_owner_messages, get_user_warns, get_user_week_count, get_weekly_norm, user_exists_in_db
 
 router = Router()
 
 AWAITING_COMPLAINT_USERS: set[int] = set()
+AWAITING_OWNER_MESSAGE_USERS: set[int] = set()
 
 
 def _is_target_group(message: Message) -> bool:
@@ -90,6 +91,69 @@ async def complaint_receive(message: Message):
     await message.answer(f"✅ Жалоба принята. Номер: #{complaint_id}")
 
 
+@router.message(F.chat.type == ChatType.PRIVATE, F.text == BTN_OWNER_MSG_CREATE)
+@router.message(Command("owner_msg"))
+async def owner_message_start(message: Message):
+    if not _is_private(message):
+        return
+    if not user_exists_in_db(message.from_user.id):
+        await message.answer("⚠️ Сообщение влд могут отправлять только участники, которые есть в базе бота.")
+        return
+    active_count = count_active_owner_messages(message.from_user.id)
+    if active_count >= 3:
+        await message.answer("⚠️ У вас уже 3 активных сообщений влд. Дождитесь, пока админ закроет хотя бы одно.")
+        return
+    AWAITING_OWNER_MESSAGE_USERS.add(message.from_user.id)
+    await message.answer("Опишите сообщение для влд одним сообщением. Отправьте текст следующим сообщением.")
+
+
+@router.message(F.chat.type == ChatType.PRIVATE, F.from_user.is_not(None), F.text, F.from_user.func(lambda u: u and u.id in AWAITING_OWNER_MESSAGE_USERS))
+async def owner_message_receive(message: Message):
+    if message.from_user.id not in AWAITING_OWNER_MESSAGE_USERS:
+        return
+
+    if not user_exists_in_db(message.from_user.id):
+        AWAITING_OWNER_MESSAGE_USERS.discard(message.from_user.id)
+        await message.answer("⚠️ Сообщение влд могут отправлять только участники, которые есть в базе бота.")
+        return
+
+    text = message.text.strip()
+    if not text:
+        await message.answer("Текст сообщения пустой. Напишите сообщение влд сообщением.")
+        return
+
+    active_count = count_active_owner_messages(message.from_user.id)
+    if active_count >= 3:
+        AWAITING_OWNER_MESSAGE_USERS.discard(message.from_user.id)
+        await message.answer("⚠️ У вас уже 3 активных сообщений влд. Новое сейчас отправить нельзя.")
+        return
+
+    AWAITING_OWNER_MESSAGE_USERS.remove(message.from_user.id)
+    owner_message_id = create_owner_message(message.from_user.id, message.from_user.username, message.from_user.full_name, text)
+    if owner_message_id is None:
+        if not user_exists_in_db(message.from_user.id):
+            await message.answer("⚠️ Сообщение влд могут отправлять только участники, которые есть в базе бота.")
+        else:
+            await message.answer("⚠️ У вас уже 3 активных сообщений влд. Новое сейчас отправить нельзя.")
+        return
+
+    owner_notice = (
+        "📩 Новое сообщение влд\n"
+        f"Номер: #{owner_message_id}\n"
+        f"Автор: {format_user(message.from_user.id, message.from_user.username, message.from_user.full_name)} "
+        f"({message.from_user.id})\n"
+        f"Текст: {text}"
+    )
+    try:
+        await bot.send_message(OWNER_ID, owner_notice)
+    except TelegramBadRequest:
+        pass
+    except Exception:
+        pass
+
+    await message.answer(f"✅ Сообщение влд принято. Номер: #{owner_message_id}")
+
+
 @router.message(F.text == BTN_MY_NORM)
 @router.message(F.text.regexp(r"(?i)^моя\s+норма$"))
 @router.message(F.text.regexp(r"(?i)^(?:📊\s*)?моя\s+норма$"))
@@ -157,6 +221,20 @@ async def my_complaints(message: Message):
         return
 
     lines = ["Ваши жалобы:"]
+    for idx, row in enumerate(rows[:20], start=1):
+        lines.append(f"{idx}. {row['created_at']}: {row['text']}")
+    await message.answer("\n".join(lines))
+
+
+@router.message(F.chat.type == ChatType.PRIVATE, F.text == BTN_OWNER_MSG_MINE)
+@router.message(Command("my_owner_msgs"))
+async def my_owner_messages(message: Message):
+    rows = get_user_owner_messages(message.from_user.id)
+    if not rows:
+        await message.answer("? ??? ???? ??? ????????? ???.")
+        return
+
+    lines = ["???? ????????? ???:"]
     for idx, row in enumerate(rows[:20], start=1):
         lines.append(f"{idx}. {row['created_at']}: {row['text']}")
     await message.answer("\n".join(lines))

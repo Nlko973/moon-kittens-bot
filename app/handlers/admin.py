@@ -24,6 +24,8 @@ from app.keyboards import (
     BTN_ADM_TG_LINKS_STATUS,
     BTN_ADM_COMPLAINTS,
     BTN_ADM_COMPLAINT_DEL,
+    BTN_ADM_OWNER_MSGS,
+    BTN_ADM_OWNER_MSG_DEL,
     BTN_ADM_NORM_STATS,
     BTN_ADM_PROMPT_BAN,
     BTN_ADM_PROMPT_KICK,
@@ -56,9 +58,11 @@ from db import (
     add_admin,
     count_users_in_db,
     delete_complaint,
+    delete_owner_message,
     extend_rest,
     get_admins,
     get_all_complaints,
+    get_all_owner_messages,
     get_all_rests,
     get_all_warns,
     get_all_week_stats,
@@ -445,6 +449,35 @@ async def cmd_del_complaint(message: Message, command: CommandObject):
         await message.answer("✅ Жалоба удалена.")
     else:
         await message.answer("⚠️ Жалоба с таким номером не найдена.")
+
+
+@router.message(Command("owner_msgs"))
+async def cmd_owner_msgs(message: Message):
+    if not await require_private_admin(message):
+        return
+    rows = get_all_owner_messages()
+    if not rows:
+        await message.answer("Сообщений влд нет.")
+        return
+    lines = ["Сообщения влд:"]
+    for row in rows[:200]:
+        author = f"{await resolve_user_label(row['user_id'], row['display_name'])} ({row['user_id']})"
+        lines.append(f"#{row['id']} {row['created_at']} {author}: {row['text']}")
+    await message.answer("\n".join(lines))
+
+
+@router.message(Command("del_owner_msg"))
+async def cmd_del_owner_msg(message: Message, command: CommandObject):
+    if not await require_owner(message):
+        return
+    if not command.args or not command.args.strip().isdigit():
+        await message.answer("Формат: /del_owner_msg <id>")
+        return
+    owner_message_id = int(command.args.strip())
+    if delete_owner_message(owner_message_id):
+        await message.answer("? ????????? ??? ???????.")
+    else:
+        await message.answer("?? ????????? ??? ? ????? ??????? ?? ???????.")
 
 
 @router.message(Command("kick"))
@@ -928,6 +961,18 @@ async def btn_complaints_del(message: Message):
     if not await require_owner(message):
         return
     await message.answer("Формат: /del_complaint <id>")
+
+
+@router.message(F.chat.type == ChatType.PRIVATE, F.text == BTN_ADM_OWNER_MSGS)
+async def btn_owner_msgs(message: Message):
+    await cmd_owner_msgs(message)
+
+
+@router.message(F.chat.type == ChatType.PRIVATE, F.text == BTN_ADM_OWNER_MSG_DEL)
+async def btn_owner_msgs_del(message: Message):
+    if not await require_owner(message):
+        return
+    await message.answer("Формат: /del_owner_msg <id>")
 
 
 @router.message(F.chat.type == ChatType.PRIVATE, F.text == BTN_ADM_SHOW_CONFIG)
