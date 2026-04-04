@@ -231,10 +231,10 @@ async def my_complaints(message: Message):
 async def my_owner_messages(message: Message):
     rows = get_user_owner_messages(message.from_user.id)
     if not rows:
-        await message.answer("? ??? ???? ??? ????????? ???.")
+        await message.answer("У вас пока нет сообщений влд.")
         return
 
-    lines = ["???? ????????? ???:"]
+    lines = ["Ваши сообщения влд:"]
     for idx, row in enumerate(rows[:20], start=1):
         lines.append(f"{idx}. {row['created_at']}: {row['text']}")
     await message.answer("\n".join(lines))

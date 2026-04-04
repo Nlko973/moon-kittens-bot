@@ -256,7 +256,7 @@ async def btn_prompt_set_param(message: Message):
         return
     _stop_dialog(message.from_user.id)
     names = ", ".join(PARAM_DEFAULTS.keys())
-    await message.answer(f"??????: /set_param <name> <value>\n????????? name: {names}")
+    await message.answer(f"Формат: /set_param <name> <value>\nДоступные name: {names}")
 
 
 @router.message(
