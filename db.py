@@ -7,6 +7,8 @@ from config import WEEKLY_NORM_DEFAULT
 
 DB_PATH = Path("data/bot.db")
 DB_PATH.parent.mkdir(exist_ok=True)
+CLEANUP_PERIOD_WEEKS = 2
+CLEANUP_INTERVAL_DAYS = CLEANUP_PERIOD_WEEKS * 7
 
 
 def now_iso() -> str:
@@ -17,6 +19,15 @@ def week_start_for(dt: Optional[datetime] = None) -> str:
     dt = dt or datetime.now()
     monday = dt.date() - timedelta(days=dt.weekday())
     return monday.isoformat()
+
+
+def cleanup_week_starts_for(dt: Optional[datetime] = None) -> list[str]:
+    dt = dt or datetime.now()
+    monday = dt.date() - timedelta(days=dt.weekday())
+    return [
+        (monday - timedelta(days=7 * offset)).isoformat()
+        for offset in range(CLEANUP_PERIOD_WEEKS - 1, -1, -1)
+    ]
 
 
 def get_conn():
@@ -868,23 +879,31 @@ def mark_inactive_warned(user_id: int):
 
 # cleanup
 
-def get_cleanup_candidates(week_start: Optional[str] = None):
-    week_start = week_start or week_start_for()
+def get_cleanup_candidates(week_starts: Optional[list[str] | str] = None):
+    if isinstance(week_starts, str):
+        week_starts = [week_starts]
+    week_starts = week_starts or cleanup_week_starts_for()
+    placeholders = ",".join("?" for _ in week_starts)
     now = now_iso()
     conn = get_conn()
     cur = conn.cursor()
     cur.execute(
-        """
+        f"""
         SELECT u.user_id, u.username, u.display_name, u.first_seen_at, COALESCE(w.count, 0) AS count
         FROM users u
-        LEFT JOIN weekly_stats w ON w.user_id = u.user_id AND w.week_start = ?
+        LEFT JOIN (
+            SELECT user_id, SUM(count) AS count
+            FROM weekly_stats
+            WHERE week_start IN ({placeholders})
+            GROUP BY user_id
+        ) w ON w.user_id = u.user_id
         LEFT JOIN rests r ON r.user_id = u.user_id
                          AND (r.expires_at IS NULL OR r.expires_at > ?)
         WHERE u.is_member = 1
           AND r.user_id IS NULL
         ORDER BY count ASC, u.display_name COLLATE NOCASE
         """,
-        (week_start, now),
+        (*week_starts, now),
     )
     rows = cur.fetchall()
     conn.close()

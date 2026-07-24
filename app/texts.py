@@ -66,6 +66,13 @@ def week_period(now: datetime) -> str:
     return f"{monday.isoformat()} - {sunday.isoformat()}"
 
 
+def cleanup_period(now: datetime) -> str:
+    current_monday = now.date() - timedelta(days=now.weekday())
+    start = current_monday - timedelta(days=7)
+    end = current_monday + timedelta(days=6)
+    return f"{start.isoformat()} - {end.isoformat()}"
+
+
 def norm_status_text(user_id: int, username: Optional[str], display_name: str, count: int, norm: int) -> str:
     has_norm = count >= norm
     status = "есть норма" if has_norm else "нет нормы"

@@ -52,9 +52,11 @@ from app.services.moderation import issue_warn, mute_user, unmute_user
 from app.services.roles import apply_role_signature, remove_role_signature
 from app.services.targets import parse_target
 from app.services.user_identity import resolve_user_label
-from app.texts import USER_NOT_FOUND, week_period
+from app.texts import USER_NOT_FOUND, cleanup_period
 from config import OWNER_ID
 from db import (
+    CLEANUP_INTERVAL_DAYS,
+    CLEANUP_PERIOD_WEEKS,
     add_admin,
     count_users_in_db,
     delete_complaint,
@@ -65,10 +67,11 @@ from db import (
     get_all_owner_messages,
     get_all_rests,
     get_all_warns,
-    get_all_week_stats,
+    get_cleanup_candidates,
     get_users_from_db,
     get_user_warns,
     get_weekly_norm,
+    get_last_cleanup_date,
     is_cleanup_enabled,
     is_cleanup_skip_once_enabled,
     is_tg_links_block_enabled,
@@ -94,6 +97,19 @@ def _next_cleanup_dt(now: Optional[datetime] = None) -> datetime:
     candidate = (now + timedelta(days=days_ahead)).replace(hour=23, minute=55, second=0, microsecond=0)
     if candidate <= now:
         candidate = (candidate + timedelta(days=7)).replace(hour=23, minute=55, second=0, microsecond=0)
+
+    last_cleanup_date = get_last_cleanup_date()
+    if not last_cleanup_date:
+        return candidate
+
+    try:
+        last_dt = datetime.fromisoformat(last_cleanup_date)
+    except ValueError:
+        return candidate
+
+    earliest = (last_dt + timedelta(days=CLEANUP_INTERVAL_DAYS)).replace(hour=23, minute=55, second=0, microsecond=0)
+    while candidate.date() < earliest.date():
+        candidate = (candidate + timedelta(days=7)).replace(hour=23, minute=55, second=0, microsecond=0)
     return candidate
 
 
@@ -114,15 +130,16 @@ async def cmd_norm_stats(message: Message):
     if not await require_private_admin(message):
         return
 
-    norm = get_weekly_norm()
-    rows = get_all_week_stats(members_only=True)
+    weekly_norm = get_weekly_norm()
+    norm = weekly_norm * CLEANUP_PERIOD_WEEKS
+    rows = get_cleanup_candidates()
     if not rows:
-        await message.answer("ℹ️ Нет данных по текущей неделе.")
+        await message.answer("ℹ️ Нет данных по текущему периоду.")
         return
 
     lines = [
-        f"📊 Недельная норма: {norm}.",
-        f"Период: {week_period(message.date)}.",
+        f"\U0001f4ca \u041d\u043e\u0440\u043c\u0430: {weekly_norm} \u0432 \u043d\u0435\u0434\u0435\u043b\u044e / {norm} \u0437\u0430 2 \u043d\u0435\u0434\u0435\u043b\u0438.",
+        f"\u041f\u0435\u0440\u0438\u043e\u0434: {cleanup_period(message.date)}.",
         f"🧹 {_cleanup_status_text()}",
     ]
     for row in rows[:200]:
@@ -144,7 +161,7 @@ async def cmd_set_norm(message: Message, command: CommandObject):
         await message.answer("⚠️ Норма должна быть больше 0.")
         return
     set_weekly_norm(value)
-    await message.answer(f"✅ Недельная норма обновлена: {value}.")
+    await message.answer(f"✅ Норма обновлена: {value} в неделю / {value * CLEANUP_PERIOD_WEEKS} за 2 недели.")
 
 
 @router.message(Command("cleanup_off"))
@@ -167,7 +184,7 @@ async def cmd_cleanup_on(message: Message):
 async def cmd_cleanup_skip_once(message: Message):
     if not await require_private_admin(message):
         return
-    set_cleanup_skip_once(True)
+    set_cleanup_skip_once(True, at=_next_cleanup_dt())
     await message.answer("✅ Текущая чистка будет пропущена.")
 
 

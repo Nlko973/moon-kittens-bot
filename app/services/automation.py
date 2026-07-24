@@ -13,9 +13,11 @@ from app.services.bot_config import get_int_param
 from app.services.chat_settings import get_group_id
 from app.services.moderation import issue_warn, mute_user, unmute_user
 from app.services.user_identity import remember_user, resolve_user_label
-from app.texts import format_user, week_period
+from app.texts import cleanup_period, format_user
 from config import OWNER_ID
 from db import (
+    CLEANUP_INTERVAL_DAYS,
+    CLEANUP_PERIOD_WEEKS,
     add_message,
     consume_cleanup_skip_once,
     delete_absent_over_30_days,
@@ -68,11 +70,12 @@ def _is_newcomer(first_seen_at: Optional[str], min_days: int = 7) -> bool:
 
 async def _send_friday_lacking_report():
     rows = get_cleanup_candidates()
-    norm = get_weekly_norm()
+    weekly_norm = get_weekly_norm()
+    norm = weekly_norm * CLEANUP_PERIOD_WEEKS
     lacking = [row for row in rows if row["count"] < norm]
     total = len(rows)
     ok_count = total - len(lacking)
-    period = week_period(datetime.now())
+    period = cleanup_period(datetime.now())
 
     if not lacking:
         await bot.send_message(
@@ -80,9 +83,9 @@ async def _send_friday_lacking_report():
             (
                 "📊 <b>Пятничный отчет по норме</b>\n"
                 f"Период: {period}\n"
-                f"Норма: <b>{norm}</b>\n"
+                f"Норма: <b>{weekly_norm}</b> в неделю / <b>{norm}</b> за 2 недели\n"
                 f"Участников в учете: <b>{total}</b>\n"
-                "🎉 У всех есть недельная норма."
+                "🎉 У всех есть норма за 2 недели."
             ),
         )
         return
@@ -90,7 +93,7 @@ async def _send_friday_lacking_report():
     lines = [
         "📊 <b>Пятничный отчет по норме</b>",
         f"Период: {period}",
-        f"Норма: <b>{norm}</b>",
+        f"Норма: <b>{weekly_norm}</b> в неделю / <b>{norm}</b> за 2 недели",
         f"Участников в учете: <b>{total}</b>",
         f"С нормой: <b>{ok_count}</b>",
         f"Без нормы: <b>{len(lacking)}</b>",
@@ -98,7 +101,11 @@ async def _send_friday_lacking_report():
         "<b>Без нормы:</b>",
     ]
     for idx, row in enumerate(lacking[:80], start=1):
-        newcomer_mark = " · новичок (меньше 7 дней)" if _is_newcomer(row["first_seen_at"]) else ""
+        newcomer_mark = (
+            f" · новичок (меньше {CLEANUP_INTERVAL_DAYS} дней)"
+            if _is_newcomer(row["first_seen_at"], min_days=CLEANUP_INTERVAL_DAYS)
+            else ""
+        )
         fallback = row["display_name"] or str(row["user_id"])
         try:
             # Don't block whole report on slow Telegram profile lookup.
@@ -167,7 +174,8 @@ async def add_message_and_guard(message: Message):
 
 async def run_week_cleanup():
     group_id = get_group_id()
-    norm = get_weekly_norm()
+    weekly_norm = get_weekly_norm()
+    norm = weekly_norm * CLEANUP_PERIOD_WEEKS
     rows = get_cleanup_candidates()
 
     punished = []
@@ -177,39 +185,39 @@ async def run_week_cleanup():
     for row in rows:
         if row["count"] >= norm:
             continue
-        if _is_newcomer(row["first_seen_at"]):
+        if _is_newcomer(row["first_seen_at"], min_days=CLEANUP_INTERVAL_DAYS):
             skipped_newcomers.append(row)
             continue
 
         warn_id, _total, _third, _expires_at = await issue_warn(
             row["user_id"],
             0,
-            "Нет недельной нормы",
+            "Нет нормы за 2 недели",
             "norma",
             duration_minutes=auto_warn_minutes,
         )
         punished.append((row, warn_id))
 
     if punished:
-        lines = [f"?? Чистка за неделю {week_period(datetime.now())}. Выдано варнов: {len(punished)}."]
+        lines = [f"?? Чистка за 2 недели {cleanup_period(datetime.now())}. Выдано варнов: {len(punished)}."]
         for row, warn_id in punished[:60]:
             user_label = await resolve_user_label(row["user_id"], row["display_name"])
             lines.append(f"- #{warn_id} {user_label}: {row['count']}/{norm}")
         if skipped_newcomers:
-            lines.append(f"Новички (меньше 7 дней) без варна: {len(skipped_newcomers)}.")
+            lines.append(f"Новички (меньше {CLEANUP_INTERVAL_DAYS} дней) без варна: {len(skipped_newcomers)}.")
         await _send_chunked(group_id, lines)
     else:
         extra = ""
         if skipped_newcomers:
             extra = f" Новичков без варна: {len(skipped_newcomers)}."
-        await bot.send_message(group_id, f"?? Чистка за неделю {week_period(datetime.now())}: нарушений нет.{extra}")
+        await bot.send_message(group_id, f"?? Чистка за 2 недели {cleanup_period(datetime.now())}: нарушений нет.{extra}")
 
     owner_lines = [
-        f"?? Статистика чистки за неделю {week_period(datetime.now())}:",
-        f"Норма: {norm}",
+        f"?? Статистика чистки за 2 недели {cleanup_period(datetime.now())}:",
+        f"Норма: {weekly_norm} в неделю / {norm} за период",
         f"Всего участников в учете: {len(rows)}",
         f"Выдано варнов: {len(punished)}",
-        f"Пропущено новичков (меньше 7 дней): {len(skipped_newcomers)}",
+        f"Пропущено новичков (меньше {CLEANUP_INTERVAL_DAYS} дней): {len(skipped_newcomers)}",
     ]
     if punished:
         owner_lines.append("Список с варнами:")
@@ -286,6 +294,33 @@ async def _run_job_with_timeout(coro, timeout_seconds: int, label: str) -> bool:
     return False
 
 
+def _next_due_sunday(now: Optional[datetime] = None) -> datetime:
+    now = now or datetime.now()
+    days_ahead = (6 - now.weekday()) % 7
+    candidate = (now + timedelta(days=days_ahead)).replace(hour=23, minute=55, second=0, microsecond=0)
+    if candidate <= now:
+        candidate = (candidate + timedelta(days=7)).replace(hour=23, minute=55, second=0, microsecond=0)
+
+    last_cleanup_date = get_last_cleanup_date()
+    if not last_cleanup_date:
+        return candidate
+
+    try:
+        last_dt = datetime.fromisoformat(last_cleanup_date)
+    except ValueError:
+        return candidate
+
+    earliest = (last_dt + timedelta(days=CLEANUP_INTERVAL_DAYS)).replace(hour=23, minute=55, second=0, microsecond=0)
+    while candidate.date() < earliest.date():
+        candidate = (candidate + timedelta(days=7)).replace(hour=23, minute=55, second=0, microsecond=0)
+    return candidate
+
+
+def _is_cleanup_friday(now: Optional[datetime] = None) -> bool:
+    now = now or datetime.now()
+    return now.weekday() == 4 and _next_due_sunday(now).date() == (now.date() + timedelta(days=2))
+
+
 async def background_jobs():
     global last_daily_run, last_friday_report
 
@@ -293,7 +328,7 @@ async def background_jobs():
         now = datetime.now()
 
         # Time-sensitive reports first, so long daily checks don't delay them.
-        if now.weekday() == 4 and now.hour >= 18:
+        if _is_cleanup_friday(now) and now.hour >= 18:
             today = now.date().isoformat()
             if last_friday_report != today:
                 ok = await _run_job_with_timeout(
@@ -306,12 +341,21 @@ async def background_jobs():
 
         if now.weekday() == 6 and now.hour >= 20:
             today = now.date().isoformat()
-            if get_last_cleanup_date() != today:
+            last_cleanup_date = get_last_cleanup_date()
+            cleanup_due = last_cleanup_date != today
+            if cleanup_due and last_cleanup_date:
+                try:
+                    last_dt = datetime.fromisoformat(last_cleanup_date)
+                    cleanup_due = (now.date() - last_dt.date()).days >= CLEANUP_INTERVAL_DAYS
+                except ValueError:
+                    cleanup_due = True
+
+            if cleanup_due:
 
                 async def _sunday_cleanup_once():
                     group_id = get_group_id()
                     if consume_cleanup_skip_once():
-                        await bot.send_message(group_id, "?? Чистка недели пропущена (одноразовый пропуск).")
+                        await bot.send_message(group_id, "?? Чистка за 2 недели пропущена (одноразовый пропуск).")
                         set_last_cleanup_date(today)
                     elif not is_cleanup_enabled():
                         set_last_cleanup_date(today)
