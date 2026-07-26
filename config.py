@@ -24,6 +24,16 @@ BOT_TOKEN = _required_env("BOT_TOKEN")
 OWNER_ID = _required_int_env("OWNER_ID")
 GROUP_ID = int(os.getenv("GROUP_ID", "-1001608669127"))
 
+WEB_ENABLED = os.getenv("WEB_ENABLED", "1") == "1"
+WEB_HOST = os.getenv("WEB_HOST", "0.0.0.0")
+WEB_PORT = int(os.getenv("WEB_PORT", "8443"))
+WEB_SSL_CERT = os.getenv("WEB_SSL_CERT", "")
+WEB_SSL_KEY = os.getenv("WEB_SSL_KEY", "")
+WEB_REQUIRE_HTTPS = os.getenv("WEB_REQUIRE_HTTPS", "1") == "1"
+WEB_OWNER_LOGIN = os.getenv("WEB_OWNER_LOGIN", "owner")
+WEB_OWNER_PASSWORD = _required_env("WEB_OWNER_PASSWORD") if WEB_ENABLED else ""
+WEB_SESSION_SECRET = os.getenv("WEB_SESSION_SECRET", "")
+
 WEEKLY_NORM_DEFAULT = int(os.getenv("WEEKLY_NORM", "100"))
 INACTIVITY_NOTICE_DAYS = int(os.getenv("INACTIVITY_NOTICE_DAYS", "3"))
 INACTIVITY_WARN_DAYS = int(os.getenv("INACTIVITY_WARN_DAYS", "5"))

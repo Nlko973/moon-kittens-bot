@@ -164,6 +164,22 @@ def init_db():
         """
     )
 
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS web_users (
+            username TEXT PRIMARY KEY,
+            password_hash TEXT NOT NULL,
+            role TEXT NOT NULL DEFAULT 'admin',
+            display_name TEXT,
+            telegram_admin_id INTEGER,
+            permissions TEXT NOT NULL DEFAULT '[]',
+            created_at TEXT,
+            updated_at TEXT,
+            active INTEGER DEFAULT 1
+        )
+        """
+    )
+
     # Migration from old schema
     _ensure_column(cur, "users", "inactive_notice_at", "TEXT")
     _ensure_column(cur, "users", "inactive_warned_at", "TEXT")
@@ -609,6 +625,72 @@ def is_admin(user_id: int, owner_id: int) -> bool:
     row = cur.fetchone()
     conn.close()
     return row is not None
+
+
+# web users
+
+def upsert_web_user(
+    username: str,
+    password_hash: str,
+    role: str,
+    display_name: str,
+    permissions: str,
+    telegram_admin_id: Optional[int] = None,
+    active: bool = True,
+):
+    conn = get_conn()
+    cur = conn.cursor()
+    now = now_iso()
+    cur.execute(
+        """
+        INSERT INTO web_users
+            (username, password_hash, role, display_name, telegram_admin_id, permissions, created_at, updated_at, active)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(username) DO UPDATE SET
+            password_hash = excluded.password_hash,
+            role = excluded.role,
+            display_name = excluded.display_name,
+            telegram_admin_id = excluded.telegram_admin_id,
+            permissions = excluded.permissions,
+            updated_at = excluded.updated_at,
+            active = excluded.active
+        """,
+        (username, password_hash, role, display_name, telegram_admin_id, permissions, now, now, 1 if active else 0),
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_web_user(username: str):
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("SELECT * FROM web_users WHERE username = ? AND active = 1", (username,))
+    row = cur.fetchone()
+    conn.close()
+    return row
+
+
+def get_web_users():
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT username, role, display_name, telegram_admin_id, permissions, created_at, updated_at, active
+        FROM web_users
+        ORDER BY role DESC, username COLLATE NOCASE
+        """
+    )
+    rows = cur.fetchall()
+    conn.close()
+    return rows
+
+
+def remove_web_user(username: str):
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("DELETE FROM web_users WHERE username = ? AND role != 'owner'", (username,))
+    conn.commit()
+    conn.close()
 
 
 # rests
