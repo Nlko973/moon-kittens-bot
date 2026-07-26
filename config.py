@@ -30,6 +30,8 @@ WEB_PORT = int(os.getenv("WEB_PORT", "8443"))
 WEB_SSL_CERT = os.getenv("WEB_SSL_CERT", "")
 WEB_SSL_KEY = os.getenv("WEB_SSL_KEY", "")
 WEB_REQUIRE_HTTPS = os.getenv("WEB_REQUIRE_HTTPS", "1") == "1"
+WEB_PUBLIC_URL = os.getenv("WEB_PUBLIC_URL", "")
+WEB_PUBLIC_HOST = os.getenv("WEB_PUBLIC_HOST", "")
 WEB_OWNER_LOGIN = os.getenv("WEB_OWNER_LOGIN", "owner")
 WEB_OWNER_PASSWORD = _required_env("WEB_OWNER_PASSWORD") if WEB_ENABLED else ""
 WEB_SESSION_SECRET = os.getenv("WEB_SESSION_SECRET", "")

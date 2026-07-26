@@ -1,4 +1,5 @@
 import re
+import socket
 from datetime import datetime, timedelta
 from typing import Optional
 
@@ -27,6 +28,7 @@ from app.keyboards import (
     BTN_ADM_OWNER_MSGS,
     BTN_ADM_OWNER_MSG_DEL,
     BTN_ADM_NORM_STATS,
+    BTN_ADM_OPEN_WEB,
     BTN_ADM_PROMPT_BAN,
     BTN_ADM_PROMPT_KICK,
     BTN_ADM_PROMPT_MUTE,
@@ -53,7 +55,7 @@ from app.services.roles import apply_role_signature, remove_role_signature
 from app.services.targets import parse_target
 from app.services.user_identity import resolve_user_label
 from app.texts import USER_NOT_FOUND, cleanup_period
-from config import OWNER_ID
+from config import OWNER_ID, WEB_ENABLED, WEB_HOST, WEB_PORT, WEB_PUBLIC_HOST, WEB_PUBLIC_URL, WEB_SSL_CERT, WEB_SSL_KEY
 from db import (
     CLEANUP_INTERVAL_DAYS,
     CLEANUP_PERIOD_WEEKS,
@@ -88,6 +90,31 @@ from db import (
 )
 
 router = Router()
+
+
+def _web_interface_url() -> str:
+    if WEB_PUBLIC_URL:
+        return WEB_PUBLIC_URL.rstrip("/")
+
+    host = WEB_PUBLIC_HOST.strip() or WEB_HOST
+    if host in {"", "0.0.0.0", "::"}:
+        host = _detect_local_ip()
+    if ":" in host and not host.startswith("["):
+        host = f"[{host}]"
+
+    scheme = "https" if WEB_SSL_CERT and WEB_SSL_KEY else "http"
+    return f"{scheme}://{host}:{WEB_PORT}/login"
+
+
+def _detect_local_ip() -> str:
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        sock.connect(("8.8.8.8", 80))
+        return sock.getsockname()[0]
+    except OSError:
+        return "127.0.0.1"
+    finally:
+        sock.close()
 
 
 def _next_cleanup_dt(now: Optional[datetime] = None) -> datetime:
@@ -995,6 +1022,16 @@ async def btn_owner_msgs_del(message: Message):
 @router.message(F.chat.type == ChatType.PRIVATE, F.text == BTN_ADM_SHOW_CONFIG)
 async def btn_show_config(message: Message):
     await cmd_show_config(message)
+
+
+@router.message(F.chat.type == ChatType.PRIVATE, F.text == BTN_ADM_OPEN_WEB)
+async def btn_open_web(message: Message):
+    if not await require_private_admin(message):
+        return
+    if not WEB_ENABLED:
+        await message.answer("Веб-интерфейс сейчас выключен. Включите WEB_ENABLED=1 и перезапустите бота.")
+        return
+    await message.answer(f"Веб-интерфейс:\n{_web_interface_url()}")
 
 
 @router.message(F.chat.type == ChatType.PRIVATE, F.text == BTN_ADM_CLEANUP_ON)
