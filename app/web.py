@@ -10,6 +10,7 @@ from typing import Any, Callable, Optional
 
 from aiohttp import web
 from aiogram.exceptions import TelegramBadRequest
+from aiogram.types import BufferedInputFile
 
 from app.runtime import bot
 from app.services.bot_config import PARAM_DEFAULTS, get_all_params, set_int_param
@@ -68,6 +69,8 @@ ALL_PERMISSIONS = [
     "rests",
     "settings",
     "broadcast",
+    "messages",
+    "cleanup",
     "users",
     "admins",
     "web_users",
@@ -78,6 +81,8 @@ PERMISSION_LABELS = {
     "rests": "Ресты",
     "settings": "Конфиги",
     "broadcast": "Публикации",
+    "messages": "Сообщения",
+    "cleanup": "Чистка",
     "users": "Участники",
     "admins": "Telegram-админы",
     "web_users": "Веб-доступы",
@@ -142,6 +147,22 @@ def _require(permission: str) -> Callable:
             if not user:
                 raise web.HTTPUnauthorized(text="Нужна авторизация")
             if user["role"] != "owner" and permission not in user["permissions"]:
+                raise web.HTTPForbidden(text="Недостаточно прав")
+            request["web_user"] = user
+            return await handler(request)
+
+        return wrapped
+
+    return decorator
+
+
+def _require_any(*permissions: str) -> Callable:
+    def decorator(handler: Callable) -> Callable:
+        async def wrapped(request: web.Request):
+            user = _current_user(request)
+            if not user:
+                raise web.HTTPUnauthorized(text="Нужна авторизация")
+            if user["role"] != "owner" and not any(permission in user["permissions"] for permission in permissions):
                 raise web.HTTPForbidden(text="Недостаточно прав")
             request["web_user"] = user
             return await handler(request)
@@ -270,6 +291,7 @@ async def api_state(request: web.Request):
                 "mutes": _list_mutes()[:250],
                 "complaints": _rows_to_dicts(get_all_complaints(active_only=True)[:250]),
                 "owner_messages": _rows_to_dicts(get_all_owner_messages(active_only=True)[:250]),
+                "cleanup_candidates": _rows_to_dicts(cleanup_rows[:250]),
                 "telegram_admins": _rows_to_dicts(get_admins()),
                 "users": _rows_to_dicts(get_users_from_db(limit=400)),
                 "web_users": [
@@ -450,37 +472,45 @@ async def api_rests(request: web.Request):
 
 @_require("broadcast")
 async def api_broadcast(request: web.Request):
-    data = await _payload(request)
+    multipart = request.content_type.startswith("multipart/")
+    data = await request.post() if multipart else await _payload(request)
     kind = str(data.get("kind") or "text")
     text = str(data.get("text") or "").strip()
-    file_id = str(data.get("file_id") or "").strip()
+    upload = data.get("media") if multipart else None
     group_id = get_group_id()
     if kind == "text":
         if not text:
             raise web.HTTPBadRequest(text="Нужен текст")
         await bot.send_message(group_id, text, parse_mode=None)
     elif kind == "photo":
-        if not file_id:
-            raise web.HTTPBadRequest(text="Нужен file_id фото")
-        await bot.send_photo(group_id, photo=file_id, caption=text or None, parse_mode=None)
+        await bot.send_photo(group_id, photo=_uploaded_media(upload), caption=text or None, parse_mode=None)
     elif kind == "gif":
-        if not file_id:
-            raise web.HTTPBadRequest(text="Нужен file_id GIF")
-        await bot.send_animation(group_id, animation=file_id, caption=text or None, parse_mode=None)
+        await bot.send_animation(group_id, animation=_uploaded_media(upload), caption=text or None, parse_mode=None)
     elif kind == "video":
-        if not file_id:
-            raise web.HTTPBadRequest(text="Нужен file_id видео")
-        await bot.send_video(group_id, video=file_id, caption=text or None, parse_mode=None)
+        await bot.send_video(group_id, video=_uploaded_media(upload), caption=text or None, parse_mode=None)
     else:
         raise web.HTTPBadRequest(text="Неизвестный тип публикации")
     return web.json_response({"ok": True, "message": "Публикация отправлена"})
 
 
-@_require("users")
+def _uploaded_media(upload: Any) -> BufferedInputFile:
+    if not upload or not getattr(upload, "file", None):
+        raise web.HTTPBadRequest(text="Выберите файл для публикации")
+    content = upload.file.read()
+    if not content:
+        raise web.HTTPBadRequest(text="Файл пустой")
+    filename = getattr(upload, "filename", None) or "media"
+    return BufferedInputFile(content, filename=filename)
+
+
+@_require_any("users", "messages")
 async def api_users(request: web.Request):
     data = await _payload(request)
     action = data.get("action")
     if action == "delete":
+        web_user = request["web_user"]
+        if web_user["role"] != "owner" and "users" not in web_user["permissions"]:
+            raise web.HTTPForbidden(text="Недостаточно прав")
         purge_user_from_db(int(data.get("user_id")))
     elif action == "delete_complaint":
         delete_complaint(int(data.get("id")))
@@ -554,6 +584,7 @@ LOGIN_HTML = """
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Moon Kittens Bot</title>
+  <link rel="icon" href="https://cdn-icons-png.flaticon.com/512/16222/16222075.png">
   <style>
     :root { color-scheme: dark; --bg:#101318; --panel:#1a2029; --line:#303947; --text:#f5f7fa; --muted:#aab4c2; --accent:#f3b35d; --cyan:#7ed8cf; --danger:#ff6b76; }
     * { box-sizing:border-box; }
@@ -599,13 +630,15 @@ APP_HTML = """
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Moon Kittens Bot Panel</title>
+  <link rel="icon" href="https://cdn-icons-png.flaticon.com/512/16222/16222075.png">
   <style>
     :root { --bg:#101318; --side:#171c24; --panel:#1e2630; --panel2:#26313d; --line:#33404f; --text:#f5f7fa; --muted:#a9b4c3; --accent:#f3b35d; --cyan:#7ed8cf; --danger:#ff6b76; --ok:#93d37c; }
     * { box-sizing:border-box; }
     body { margin:0; min-height:100vh; font-family:Inter,Segoe UI,Arial,sans-serif; background:var(--bg); color:var(--text); }
     .shell { display:grid; grid-template-columns:260px 1fr; min-height:100vh; }
     aside { background:var(--side); border-right:1px solid var(--line); padding:20px; position:sticky; top:0; height:100vh; }
-    .brand { font-size:22px; font-weight:850; margin-bottom:4px; }
+    .brand { display:flex; gap:10px; align-items:center; font-size:22px; font-weight:850; margin-bottom:4px; }
+    .brand img { width:34px; height:34px; border-radius:8px; }
     .who { color:var(--muted); font-size:13px; margin-bottom:22px; overflow-wrap:anywhere; }
     nav button, .ghost { width:100%; min-height:38px; border:1px solid transparent; background:transparent; color:var(--muted); text-align:left; padding:0 10px; border-radius:8px; cursor:pointer; font-weight:700; }
     nav button.active, nav button:hover, .ghost:hover { background:var(--panel); color:var(--text); border-color:var(--line); }
@@ -644,7 +677,7 @@ APP_HTML = """
 <body>
 <div class="shell">
   <aside>
-    <div class="brand">Moon Kittens</div>
+    <div class="brand"><img src="https://cdn-icons-png.flaticon.com/512/16222/16222075.png" alt="">Moon Kittens</div>
     <div class="who" id="who">Панель бота</div>
     <nav id="nav"></nav>
     <button class="ghost" onclick="logout()">Выйти</button>
@@ -656,6 +689,8 @@ APP_HTML = """
     <section id="rests" class="section"></section>
     <section id="settings" class="section"></section>
     <section id="broadcast" class="section"></section>
+    <section id="messages" class="section"></section>
+    <section id="cleanup" class="section"></section>
     <section id="users" class="section"></section>
     <section id="admins" class="section"></section>
   </main>
@@ -664,7 +699,8 @@ APP_HTML = """
 <script>
 const sections = [
   ['dashboard','Обзор','view'], ['moderation','Модерация','moderation'], ['rests','Ресты','rests'],
-  ['settings','Конфиги','settings'], ['broadcast','Публикации','broadcast'], ['users','Участники','users'], ['admins','Доступы','admins']
+  ['settings','Конфиги','settings'], ['broadcast','Публикации','broadcast'], ['messages','Сообщения','messages'],
+  ['cleanup','Чистка','cleanup'], ['users','Участники','users'], ['admins','Доступы','admins']
 ];
 let me = null, state = null;
 const can = (p) => me && (me.role === 'owner' || me.permissions.includes(p));
@@ -690,7 +726,7 @@ function show(id) {
   title.textContent = sections.find(s => s[0] === id)[1];
 }
 async function loadState() { state = await api('/api/state'); renderAll(); }
-function renderAll() { renderDashboard(); renderModeration(); renderRests(); renderSettings(); renderBroadcast(); renderUsers(); renderAdmins(); }
+function renderAll() { renderDashboard(); renderModeration(); renderRests(); renderSettings(); renderBroadcast(); renderMessages(); renderCleanup(); renderUsers(); renderAdmins(); }
 function stat(label, value) { return `<div class="card stat"><span class="muted">${label}</span><b>${esc(value)}</b></div>`; }
 function tableCard(name, rows, cols) {
   const cell = (row, col) => col === 'action' ? (row[col] || '') : esc(row[col]);
@@ -751,9 +787,21 @@ async function saveConfig(event, form) {
 }
 function renderBroadcast() {
   if (!can('broadcast')) return;
-  broadcast.innerHTML = `<form class="card" onsubmit="sendBroadcast(event,this)"><h3>Публикация в группу</h3><div class="grid three"><div><label>Тип</label><select name="kind"><option value="text">Текст</option><option value="photo">Фото</option><option value="gif">GIF</option><option value="video">Видео</option></select></div><div><label>file_id для медиа</label><input name="file_id"></div></div><label>Текст или подпись</label><textarea name="text"></textarea><button>Отправить</button></form>`;
+  broadcast.innerHTML = `<form class="card" onsubmit="sendBroadcast(event,this)"><h3>Публикация в группу</h3><div class="grid three"><div><label>Тип</label><select name="kind" onchange="toggleMediaInput(this.form)"><option value="text">Текст</option><option value="photo">Фото</option><option value="gif">GIF</option><option value="video">Видео</option></select></div><div><label>Файл на устройстве</label><input name="media" type="file" accept="image/*,video/*,.gif"></div></div><label>Текст или подпись</label><textarea name="text"></textarea><button>Отправить</button></form>`;
+  toggleMediaInput(broadcast.querySelector('form'));
 }
-async function sendBroadcast(event, form) { event.preventDefault(); const data = await post('/api/broadcast', Object.fromEntries(new FormData(form).entries())); toastMsg(data.message); form.reset(); }
+function toggleMediaInput(form) {
+  const media = form.elements.media;
+  media.disabled = form.elements.kind.value === 'text';
+  media.required = !media.disabled;
+}
+async function sendBroadcast(event, form) {
+  event.preventDefault();
+  const data = await api('/api/broadcast', {method:'POST', body:new FormData(form)});
+  toastMsg(data.message);
+  form.reset();
+  toggleMediaInput(form);
+}
 function renderUsers() {
   if (!can('users')) return;
   const dbUsers = state.lists.users.map(r => ({...r, action:`<button class="danger" onclick="deleteDbUser('${esc(r.user_id)}')">Удалить</button>`}));
@@ -764,6 +812,25 @@ function renderUsers() {
 async function deleteDbUser(userId) { await post('/api/users', {action:'delete', user_id:userId}); toastMsg('Пользователь удалён из БД'); await loadState(); }
 async function deleteComplaint(id) { await post('/api/users', {action:'delete_complaint', id}); toastMsg('Жалоба закрыта'); await loadState(); }
 async function deleteOwnerMsg(id) { await post('/api/users', {action:'delete_owner_message', id}); toastMsg('Сообщение закрыто'); await loadState(); }
+function renderMessages() {
+  if (!can('messages')) return;
+  const complaints = state.lists.complaints.map(r => ({...r, action:`<button class="danger" onclick="deleteComplaint('${esc(r.id)}')">Закрыть</button>`}));
+  const ownerMsgs = state.lists.owner_messages.map(r => ({...r, action:`<button class="danger" onclick="deleteOwnerMsg('${esc(r.id)}')">Закрыть</button>`}));
+  messages.innerHTML = `<div class="grid two">${tableCard('Жалобы', complaints, ['id','user_id','display_name','text','created_at','action'])}${tableCard('Сообщения влд', ownerMsgs, ['id','user_id','display_name','text','created_at','action'])}</div>`;
+}
+function renderCleanup() {
+  if (!can('cleanup')) return;
+  const c = state.config;
+  const rows = (state.lists.cleanup_candidates || []).map(r => ({...r, status:Number(r.count || 0) >= Number(c.weekly_norm || 0) * 2 ? 'ok' : 'ниже нормы'}));
+  cleanup.innerHTML = `<form class="card" onsubmit="saveCleanup(event,this)"><h3>Чистка</h3><div class="row"><label class="check"><input type="checkbox" name="cleanup_enabled" ${c.cleanup_enabled?'checked':''}> Авточистка включена</label><label class="check"><input type="checkbox" name="cleanup_skip_once"> Пропустить ближайшую чистку</label><button>Сохранить</button></div></form>${tableCard('Кандидаты по норме', rows, ['user_id','display_name','first_seen_at','count','status'])}`;
+}
+async function saveCleanup(event, form) {
+  event.preventDefault();
+  const fd = new FormData(form);
+  await post('/api/config', {cleanup_enabled:fd.has('cleanup_enabled'), cleanup_skip_once:fd.has('cleanup_skip_once')});
+  toastMsg('Настройки чистки сохранены');
+  await loadState();
+}
 function renderAdmins() {
   if (!can('admins')) return;
   const labels = state.permission_labels;
