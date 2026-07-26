@@ -24,7 +24,7 @@ BOT_TOKEN = _required_env("BOT_TOKEN")
 OWNER_ID = _required_int_env("OWNER_ID")
 GROUP_ID = int(os.getenv("GROUP_ID", "-1001608669127"))
 
-WEB_ENABLED = os.getenv("WEB_ENABLED", "1") == "1"
+WEB_ENABLED = os.getenv("WEB_ENABLED", "0") == "1"
 WEB_HOST = os.getenv("WEB_HOST", "0.0.0.0")
 WEB_PORT = int(os.getenv("WEB_PORT", "8443"))
 WEB_SSL_CERT = os.getenv("WEB_SSL_CERT", "")

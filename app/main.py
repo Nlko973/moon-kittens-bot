@@ -4,7 +4,6 @@ import contextlib
 from app.handlers import register_handlers
 from app.runtime import bot, dp
 from app.services.automation import background_jobs
-from app.web import start_web_app
 from config import WEB_ENABLED
 from db import init_db
 
@@ -20,6 +19,8 @@ async def run():
         await bot.delete_webhook(drop_pending_updates=False)
         jobs_task = asyncio.create_task(background_jobs())
         if WEB_ENABLED:
+            from app.web import start_web_app
+
             web_runner = await start_web_app()
         await dp.start_polling(bot)
     finally:
