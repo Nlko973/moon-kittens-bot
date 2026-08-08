@@ -1,6 +1,7 @@
 import base64
 import hashlib
 import hmac
+import asyncio
 import json
 import secrets
 import ssl
@@ -18,6 +19,7 @@ from app.services.chat_settings import get_group_id, set_group_id
 from app.services.duration_parser import parse_deadline, parse_ru_duration_to_minutes
 from app.services.moderation import issue_warn, mute_user, unmute_user
 from app.services.roles import apply_role_signature, remove_role_signature
+from app.services.restart import restart_bot
 from app.services.targets import parse_target
 from config import (
     OWNER_ID,
@@ -39,14 +41,16 @@ from db import (
     get_all_owner_messages,
     get_all_rests,
     get_all_warns,
+    get_biweekly_norm,
     get_cleanup_candidates,
     get_conn,
     get_users_from_db,
     get_web_user,
     get_web_users,
-    get_weekly_norm,
+    get_owner_notification_duplicate_ids,
     is_cleanup_enabled,
     is_cleanup_skip_once_enabled,
+    is_inactive_checks_enabled,
     is_tg_links_block_enabled,
     purge_user_from_db,
     remove_admin,
@@ -56,9 +60,11 @@ from db import (
     remove_web_user,
     set_cleanup_enabled,
     set_cleanup_skip_once,
+    set_inactive_checks_enabled,
+    set_owner_notification_duplicate_ids,
     set_rest_until,
     set_tg_links_block_enabled,
-    set_weekly_norm,
+    set_biweekly_norm,
     upsert_web_user,
 )
 
@@ -80,7 +86,7 @@ PERMISSION_LABELS = {
     "moderation": "Модерация",
     "rests": "Ресты",
     "settings": "Конфиги",
-    "broadcast": "Публикации",
+    "broadcast": "Писать от имени бота",
     "messages": "Сообщения",
     "cleanup": "Чистка",
     "users": "Участники",
@@ -254,6 +260,12 @@ async def api_logout(request: web.Request):
     return response
 
 
+@_require("settings")
+async def api_restart(request: web.Request):
+    asyncio.create_task(restart_bot())
+    return web.json_response({"ok": True, "message": "Бот перезагружается. Данные в базе сохраняются."})
+
+
 @_require("view")
 async def api_me(request: web.Request):
     return web.json_response(request["web_user"])
@@ -261,10 +273,9 @@ async def api_me(request: web.Request):
 
 @_require("view")
 async def api_state(request: web.Request):
-    weekly_norm = get_weekly_norm()
+    norm_2w = get_biweekly_norm()
     cleanup_rows = get_cleanup_candidates()
-    norm = weekly_norm * 2
-    lacking = sum(1 for row in cleanup_rows if int(row["count"] or 0) < norm)
+    lacking = sum(1 for row in cleanup_rows if int(row["count"] or 0) < norm_2w)
     return web.json_response(
         {
             "summary": {
@@ -279,9 +290,11 @@ async def api_state(request: web.Request):
             "config": {
                 "owner_id": OWNER_ID,
                 "group_id": get_group_id(),
-                "weekly_norm": weekly_norm,
+                "norm_2w": norm_2w,
                 "cleanup_enabled": is_cleanup_enabled(),
                 "cleanup_skip_once": is_cleanup_skip_once_enabled(),
+                "inactive_checks_enabled": is_inactive_checks_enabled(),
+                "owner_notification_duplicate_ids": get_owner_notification_duplicate_ids(),
                 "tg_links_block": is_tg_links_block_enabled(),
                 "params": get_all_params(),
             },
@@ -310,13 +323,23 @@ async def api_config(request: web.Request):
     data = await _payload(request)
     if "group_id" in data:
         set_group_id(int(data["group_id"]))
-    if "weekly_norm" in data:
-        weekly_norm = int(data["weekly_norm"])
-        if weekly_norm <= 0:
+    if "norm_2w" in data:
+        norm_2w = int(data["norm_2w"])
+        if norm_2w <= 0:
             raise web.HTTPBadRequest(text="Норма должна быть больше 0")
-        set_weekly_norm(weekly_norm)
+        set_biweekly_norm(norm_2w)
     if "cleanup_enabled" in data:
         set_cleanup_enabled(bool(data["cleanup_enabled"]))
+    if "inactive_checks_enabled" in data:
+        set_inactive_checks_enabled(bool(data["inactive_checks_enabled"]))
+    if "owner_notification_duplicate_ids" in data:
+        ids = []
+        for raw in str(data.get("owner_notification_duplicate_ids") or "").replace(",", " ").split():
+            try:
+                ids.append(int(raw))
+            except ValueError:
+                raise web.HTTPBadRequest(text=f"Некорректный Telegram ID: {raw}")
+        set_owner_notification_duplicate_ids(ids)
     if data.get("cleanup_skip_once"):
         set_cleanup_skip_once(True)
     if "tg_links_block" in data:
@@ -542,6 +565,7 @@ def create_web_app() -> web.Application:
     app.router.add_get("/login", login_page)
     app.router.add_post("/api/login", api_login)
     app.router.add_post("/api/logout", api_logout)
+    app.router.add_post("/api/restart", api_restart)
     app.router.add_get("/api/me", api_me)
     app.router.add_get("/api/state", api_state)
     app.router.add_post("/api/config", api_config)
@@ -773,17 +797,26 @@ async function removeRest(userId) { await post('/api/rests', {action:'remove', t
 function renderSettings() {
   if (!can('settings')) return;
   const c = state.config, params = c.params;
+  const duplicateSet = new Set((c.owner_notification_duplicate_ids || []).map(String));
+  const duplicateAdmins = (state.lists.telegram_admins || []).map(a => `<label class="check"><input type="checkbox" name="duplicate_admin_ids" value="${esc(a.user_id)}" ${duplicateSet.has(String(a.user_id))?'checked':''}> ${esc(a.name || a.user_id)}</label>`).join('');
   settings.innerHTML = `<form class="card" onsubmit="saveConfig(event,this)"><h3>Основные настройки</h3>
-    <div class="grid three"><div><label>GROUP_ID</label><input name="group_id" value="${esc(c.group_id)}"></div><div><label>WEEKLY_NORM</label><input name="weekly_norm" value="${esc(c.weekly_norm)}"></div><div><label>TG-ссылки</label><select name="tg_links_block"><option value="0">Разрешены</option><option value="1" ${c.tg_links_block?'selected':''}>Запрещены</option></select></div></div>
+    <div class="grid three"><div><label>GROUP_ID</label><input name="group_id" value="${esc(c.group_id)}"></div><div><label>Норма за 2 недели</label><input name="norm_2w" value="${esc(c.norm_2w)}"></div><div><label>TG-ссылки</label><select name="tg_links_block"><option value="0">Разрешены</option><option value="1" ${c.tg_links_block?'selected':''}>Запрещены</option></select></div></div>
+    <label>Дублировать ЛС влд для Telegram ID</label><input name="owner_notification_duplicate_ids" value="${esc((c.owner_notification_duplicate_ids || []).join(', '))}" placeholder="123456789, 987654321">
+    <div class="perm-grid">${duplicateAdmins}</div>
     <div class="grid three">${Object.entries(params).map(([k,v])=>`<div><label>${esc(k)}</label><input name="param_${esc(k)}" value="${esc(v)}"></div>`).join('')}</div>
-    <div class="row" style="margin-top:12px"><label class="check"><input type="checkbox" name="cleanup_enabled" ${c.cleanup_enabled?'checked':''}> Авточистка</label><label class="check"><input type="checkbox" name="cleanup_skip_once"> Пропустить ближайшую чистку</label></div><button>Сохранить</button></form>`;
+    <div class="row" style="margin-top:12px"><label class="check"><input type="checkbox" name="cleanup_enabled" ${c.cleanup_enabled?'checked':''}> Авточистка</label><label class="check"><input type="checkbox" name="inactive_checks_enabled" ${c.inactive_checks_enabled?'checked':''}> Уведомления и варны за неактив</label><label class="check"><input type="checkbox" name="cleanup_skip_once"> Пропустить ближайшую чистку</label></div><div class="row"><button>Сохранить</button><button type="button" class="danger" onclick="restartBot()">Перезагрузить бота</button></div></form>`;
 }
 async function saveConfig(event, form) {
   event.preventDefault();
   const fd = new FormData(form), params = {};
   for (const [k,v] of fd.entries()) if (k.startsWith('param_')) params[k.slice(6)] = v;
-  await post('/api/config', {group_id:fd.get('group_id'), weekly_norm:fd.get('weekly_norm'), tg_links_block:fd.get('tg_links_block') === '1', cleanup_enabled:fd.has('cleanup_enabled'), cleanup_skip_once:fd.has('cleanup_skip_once'), params});
+  const duplicateIds = [fd.get('owner_notification_duplicate_ids'), ...fd.getAll('duplicate_admin_ids')].filter(Boolean).join(', ');
+  await post('/api/config', {group_id:fd.get('group_id'), norm_2w:fd.get('norm_2w'), owner_notification_duplicate_ids:duplicateIds, tg_links_block:fd.get('tg_links_block') === '1', cleanup_enabled:fd.has('cleanup_enabled'), inactive_checks_enabled:fd.has('inactive_checks_enabled'), cleanup_skip_once:fd.has('cleanup_skip_once'), params});
   toastMsg('Конфиг сохранён'); await loadState();
+}
+async function restartBot() {
+  await post('/api/restart', {});
+  toastMsg('Бот перезагружается');
 }
 function renderBroadcast() {
   if (!can('broadcast')) return;
@@ -821,7 +854,7 @@ function renderMessages() {
 function renderCleanup() {
   if (!can('cleanup')) return;
   const c = state.config;
-  const rows = (state.lists.cleanup_candidates || []).map(r => ({...r, status:Number(r.count || 0) >= Number(c.weekly_norm || 0) * 2 ? 'ok' : 'ниже нормы'}));
+  const rows = (state.lists.cleanup_candidates || []).map(r => ({...r, status:Number(r.count || 0) >= Number(c.norm_2w || 0) ? 'ok' : 'ниже нормы'}));
   cleanup.innerHTML = `<form class="card" onsubmit="saveCleanup(event,this)"><h3>Чистка</h3><div class="row"><label class="check"><input type="checkbox" name="cleanup_enabled" ${c.cleanup_enabled?'checked':''}> Авточистка включена</label><label class="check"><input type="checkbox" name="cleanup_skip_once"> Пропустить ближайшую чистку</label><button>Сохранить</button></div></form>${tableCard('Кандидаты по норме', rows, ['user_id','display_name','first_seen_at','count','status'])}`;
 }
 async function saveCleanup(event, form) {

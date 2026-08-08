@@ -6,6 +6,7 @@ BTN_ADMIN_PANEL = "Админ панель"
 
 BTN_MY_NORM = "Моя норма"
 BTN_MY_REST = "Мой рест"
+BTN_TAKE_REST = "Взять рест"
 BTN_MY_WARNS = "Мои варны"
 BTN_COMPLAINT_CREATE = "Написать жалобу"
 BTN_COMPLAINT_MINE = "Мои жалобы"
@@ -46,14 +47,16 @@ BTN_ADM_DEL_ADMIN = "Удалить админа"
 BTN_ADM_DB_USERS = "Участники в БД"
 BTN_ADM_DB_USER_DEL = "Удалить из БД"
 BTN_ADM_OPEN_WEB = "Открыть веб интерфейс"
+BTN_ADM_RESTART_BOT = "Перезагрузить бота"
 
 
 def private_user_kb(is_admin: bool) -> ReplyKeyboardMarkup:
     rows = [
         [KeyboardButton(text=BTN_MY_NORM), KeyboardButton(text=BTN_MY_WARNS)],
-        [KeyboardButton(text=BTN_MY_REST), KeyboardButton(text=BTN_COMPLAINT_CREATE)],
-        [KeyboardButton(text=BTN_COMPLAINT_MINE), KeyboardButton(text=BTN_OWNER_MSG_CREATE)],
-        [KeyboardButton(text=BTN_OWNER_MSG_MINE), KeyboardButton(text=BTN_MENU)],
+        [KeyboardButton(text=BTN_MY_REST), KeyboardButton(text=BTN_TAKE_REST)],
+        [KeyboardButton(text=BTN_COMPLAINT_CREATE), KeyboardButton(text=BTN_COMPLAINT_MINE)],
+        [KeyboardButton(text=BTN_OWNER_MSG_CREATE), KeyboardButton(text=BTN_OWNER_MSG_MINE)],
+        [KeyboardButton(text=BTN_MENU)],
     ]
     if is_admin:
         rows.append([KeyboardButton(text=BTN_ADMIN_PANEL)])
@@ -81,6 +84,7 @@ def private_admin_panel_kb(is_owner: bool) -> ReplyKeyboardMarkup:
         rows.append([KeyboardButton(text=BTN_ADM_PROMPT_SAY), KeyboardButton(text=BTN_ADM_PROMPT_SET_PARAM)])
         rows.append([KeyboardButton(text=BTN_ADM_ADD_ADMIN), KeyboardButton(text=BTN_ADM_DEL_ADMIN)])
         rows.append([KeyboardButton(text=BTN_ADM_DB_USERS), KeyboardButton(text=BTN_ADM_DB_USER_DEL)])
+        rows.append([KeyboardButton(text=BTN_ADM_RESTART_BOT)])
     return ReplyKeyboardMarkup(keyboard=rows, resize_keyboard=True)
 
 

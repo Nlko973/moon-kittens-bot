@@ -12,9 +12,9 @@ from app.services.access import is_bot_admin
 from app.services.bot_config import get_int_param
 from app.services.chat_settings import get_group_id
 from app.services.moderation import issue_warn, mute_user, unmute_user
+from app.services.owner_notifications import owner_notification_recipients
 from app.services.user_identity import remember_user, resolve_user_label
 from app.texts import cleanup_period, format_user
-from config import OWNER_ID
 from db import (
     CLEANUP_INTERVAL_DAYS,
     CLEANUP_PERIOD_WEEKS,
@@ -23,12 +23,13 @@ from db import (
     delete_absent_over_30_days,
     get_cleanup_candidates,
     get_expired_mutes,
+    get_biweekly_norm,
     get_inactive_candidates,
     get_last_cleanup_date,
     get_user_brief,
     get_user_week_count,
-    get_weekly_norm,
     is_cleanup_enabled,
+    is_inactive_checks_enabled,
     is_on_rest,
     mark_inactive_notice,
     mark_inactive_warned,
@@ -70,8 +71,7 @@ def _is_newcomer(first_seen_at: Optional[str], min_days: int = 7) -> bool:
 
 async def _send_friday_lacking_report():
     rows = get_cleanup_candidates()
-    weekly_norm = get_weekly_norm()
-    norm = weekly_norm * CLEANUP_PERIOD_WEEKS
+    norm = get_biweekly_norm()
     lacking = [row for row in rows if row["count"] < norm]
     total = len(rows)
     ok_count = total - len(lacking)
@@ -83,7 +83,7 @@ async def _send_friday_lacking_report():
             (
                 "📊 <b>Пятничный отчет по норме</b>\n"
                 f"Период: {period}\n"
-                f"Норма: <b>{weekly_norm}</b> в неделю / <b>{norm}</b> за 2 недели\n"
+                f"Норма: <b>{norm}</b> за 2 недели\n"
                 f"Участников в учете: <b>{total}</b>\n"
                 "🎉 У всех есть норма за 2 недели."
             ),
@@ -93,7 +93,7 @@ async def _send_friday_lacking_report():
     lines = [
         "📊 <b>Пятничный отчет по норме</b>",
         f"Период: {period}",
-        f"Норма: <b>{weekly_norm}</b> в неделю / <b>{norm}</b> за 2 недели",
+        f"Норма: <b>{norm}</b> за 2 недели",
         f"Участников в учете: <b>{total}</b>",
         f"С нормой: <b>{ok_count}</b>",
         f"Без нормы: <b>{len(lacking)}</b>",
@@ -174,8 +174,7 @@ async def add_message_and_guard(message: Message):
 
 async def run_week_cleanup():
     group_id = get_group_id()
-    weekly_norm = get_weekly_norm()
-    norm = weekly_norm * CLEANUP_PERIOD_WEEKS
+    norm = get_biweekly_norm()
     rows = get_cleanup_candidates()
 
     punished = []
@@ -214,7 +213,7 @@ async def run_week_cleanup():
 
     owner_lines = [
         f"?? Статистика чистки за 2 недели {cleanup_period(datetime.now())}:",
-        f"Норма: {weekly_norm} в неделю / {norm} за период",
+        f"Норма: {norm} за период",
         f"Всего участников в учете: {len(rows)}",
         f"Выдано варнов: {len(punished)}",
         f"Пропущено новичков (меньше {CLEANUP_INTERVAL_DAYS} дней): {len(skipped_newcomers)}",
@@ -226,12 +225,16 @@ async def run_week_cleanup():
             owner_lines.append(f"- #{warn_id} {user_label} ({row['count']}/{norm})")
 
     try:
-        await _send_chunked(OWNER_ID, owner_lines)
+        for chat_id in owner_notification_recipients():
+            await _send_chunked(chat_id, owner_lines)
     except TelegramBadRequest:
         pass
 
 
 async def run_inactivity_checks():
+    if not is_inactive_checks_enabled():
+        return
+
     group_id = get_group_id()
     inactivity_notice_days = get_int_param("inactivity_notice_days")
     inactivity_warn_days = get_int_param("inactivity_warn_days")

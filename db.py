@@ -197,6 +197,9 @@ def init_db():
     if get_setting("weekly_norm", cur) is None:
         set_setting("weekly_norm", str(WEEKLY_NORM_DEFAULT), cur)
 
+    if get_setting("norm_2w", cur) is None:
+        set_setting("norm_2w", str(WEEKLY_NORM_DEFAULT * CLEANUP_PERIOD_WEEKS), cur)
+
     if get_setting("cleanup_enabled", cur) is None:
         set_setting("cleanup_enabled", "1", cur)
 
@@ -208,6 +211,12 @@ def init_db():
 
     if get_setting("tg_links_block", cur) is None:
         set_setting("tg_links_block", "0", cur)
+
+    if get_setting("inactive_checks_enabled", cur) is None:
+        set_setting("inactive_checks_enabled", "1", cur)
+
+    if get_setting("owner_notification_duplicate_ids", cur) is None:
+        set_setting("owner_notification_duplicate_ids", "", cur)
 
     conn.commit()
     conn.close()
@@ -255,6 +264,14 @@ def get_weekly_norm() -> int:
 
 def set_weekly_norm(value: int):
     set_setting("weekly_norm", str(value))
+
+
+def get_biweekly_norm() -> int:
+    return int(get_setting("norm_2w", default=str(WEEKLY_NORM_DEFAULT * CLEANUP_PERIOD_WEEKS)) or WEEKLY_NORM_DEFAULT * CLEANUP_PERIOD_WEEKS)
+
+
+def set_biweekly_norm(value: int):
+    set_setting("norm_2w", str(value))
 
 
 def is_cleanup_enabled() -> bool:
@@ -316,6 +333,35 @@ def is_tg_links_block_enabled() -> bool:
 
 def set_tg_links_block_enabled(enabled: bool):
     set_setting("tg_links_block", "1" if enabled else "0")
+
+
+def is_inactive_checks_enabled() -> bool:
+    return get_setting("inactive_checks_enabled", default="1") == "1"
+
+
+def set_inactive_checks_enabled(enabled: bool):
+    set_setting("inactive_checks_enabled", "1" if enabled else "0")
+
+
+def get_owner_notification_duplicate_ids() -> list[int]:
+    raw = get_setting("owner_notification_duplicate_ids", default="") or ""
+    ids: list[int] = []
+    for part in raw.replace(",", " ").split():
+        try:
+            user_id = int(part)
+        except ValueError:
+            continue
+        if user_id not in ids:
+            ids.append(user_id)
+    return ids
+
+
+def set_owner_notification_duplicate_ids(user_ids: list[int]):
+    clean = []
+    for user_id in user_ids:
+        if user_id not in clean:
+            clean.append(int(user_id))
+    set_setting("owner_notification_duplicate_ids", ",".join(str(user_id) for user_id in clean))
 
 
 # users and stats
@@ -430,6 +476,20 @@ def get_user_week_count(user_id: int, week_start: Optional[str] = None) -> int:
     row = cur.fetchone()
     conn.close()
     return row["count"] if row else 0
+
+
+def get_user_period_count(user_id: int, week_starts: Optional[list[str]] = None) -> int:
+    week_starts = week_starts or cleanup_week_starts_for()
+    placeholders = ",".join("?" for _ in week_starts)
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        f"SELECT COALESCE(SUM(count), 0) AS count FROM weekly_stats WHERE user_id = ? AND week_start IN ({placeholders})",
+        (user_id, *week_starts),
+    )
+    row = cur.fetchone()
+    conn.close()
+    return int(row["count"] if row else 0)
 
 
 def get_all_week_stats(week_start: Optional[str] = None, members_only: bool = True):

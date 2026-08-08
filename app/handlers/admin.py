@@ -1,3 +1,4 @@
+import asyncio
 import re
 import socket
 from datetime import datetime, timedelta
@@ -33,6 +34,7 @@ from app.keyboards import (
     BTN_ADM_PROMPT_KICK,
     BTN_ADM_PROMPT_MUTE,
     BTN_ADM_PROMPT_REST,
+    BTN_ADM_RESTART_BOT,
     BTN_ADM_PROMPT_SAY,
     BTN_ADM_PROMPT_SET_PARAM,
     BTN_ADM_PROMPT_UNBAN,
@@ -52,6 +54,7 @@ from app.services.chat_settings import get_group_id, set_group_id
 from app.services.duration_parser import parse_deadline, parse_ru_duration_to_minutes
 from app.services.moderation import issue_warn, mute_user, unmute_user
 from app.services.roles import apply_role_signature, remove_role_signature
+from app.services.restart import restart_bot
 from app.services.targets import parse_target
 from app.services.user_identity import resolve_user_label
 from app.texts import USER_NOT_FOUND, cleanup_period
@@ -69,13 +72,14 @@ from db import (
     get_all_owner_messages,
     get_all_rests,
     get_all_warns,
+    get_biweekly_norm,
     get_cleanup_candidates,
     get_users_from_db,
     get_user_warns,
-    get_weekly_norm,
     get_last_cleanup_date,
     is_cleanup_enabled,
     is_cleanup_skip_once_enabled,
+    is_inactive_checks_enabled,
     is_tg_links_block_enabled,
     remove_admin,
     remove_rest,
@@ -86,7 +90,7 @@ from db import (
     set_cleanup_skip_once,
     set_tg_links_block_enabled,
     set_rest_until,
-    set_weekly_norm,
+    set_biweekly_norm,
 )
 
 router = Router()
@@ -157,15 +161,14 @@ async def cmd_norm_stats(message: Message):
     if not await require_private_admin(message):
         return
 
-    weekly_norm = get_weekly_norm()
-    norm = weekly_norm * CLEANUP_PERIOD_WEEKS
+    norm = get_biweekly_norm()
     rows = get_cleanup_candidates()
     if not rows:
         await message.answer("ℹ️ Нет данных по текущему периоду.")
         return
 
     lines = [
-        f"\U0001f4ca \u041d\u043e\u0440\u043c\u0430: {weekly_norm} \u0432 \u043d\u0435\u0434\u0435\u043b\u044e / {norm} \u0437\u0430 2 \u043d\u0435\u0434\u0435\u043b\u0438.",
+        f"📊 Норма: {norm} за 2 недели.",
         f"\u041f\u0435\u0440\u0438\u043e\u0434: {cleanup_period(message.date)}.",
         f"🧹 {_cleanup_status_text()}",
     ]
@@ -187,8 +190,8 @@ async def cmd_set_norm(message: Message, command: CommandObject):
     if value <= 0:
         await message.answer("⚠️ Норма должна быть больше 0.")
         return
-    set_weekly_norm(value)
-    await message.answer(f"✅ Норма обновлена: {value} в неделю / {value * CLEANUP_PERIOD_WEEKS} за 2 недели.")
+    set_biweekly_norm(value)
+    await message.answer(f"✅ Норма обновлена: {value} за 2 недели.")
 
 
 @router.message(Command("cleanup_off"))
@@ -849,8 +852,9 @@ async def cmd_show_config(message: Message):
         "⚙️ Текущая конфигурация:",
         f"OWNER_ID: {OWNER_ID}",
         f"GROUP_ID: {get_group_id()}",
-        f"WEEKLY_NORM: {get_weekly_norm()}",
+        f"NORM_2W: {get_biweekly_norm()}",
         f"CLEANUP_ENABLED: {'1' if is_cleanup_enabled() else '0'}",
+        f"INACTIVE_CHECKS_ENABLED: {'1' if is_inactive_checks_enabled() else '0'}",
         f"TG_LINKS_BLOCK: {'1' if is_tg_links_block_enabled() else '0'}",
         f"inactivity_notice_days: {params['inactivity_notice_days']}",
         f"inactivity_warn_days: {params['inactivity_warn_days']}",
@@ -864,6 +868,14 @@ async def cmd_show_config(message: Message):
         f"cleanup_warn_duration_minutes: {params['cleanup_warn_duration_minutes']}",
     ]
     await message.answer("\n".join(lines))
+
+
+@router.message(Command("restart_bot"))
+async def cmd_restart_bot(message: Message):
+    if not await require_owner(message):
+        return
+    await message.answer("✅ Перезагружаю бота. Данные в базе сохраняются.")
+    asyncio.create_task(restart_bot())
 
 
 @router.message(Command("db_users"))
@@ -1032,6 +1044,11 @@ async def btn_open_web(message: Message):
         await message.answer("Веб-интерфейс сейчас выключен. Включите WEB_ENABLED=1 и перезапустите бота.")
         return
     await message.answer(f"Веб-интерфейс:\n{_web_interface_url()}")
+
+
+@router.message(F.chat.type == ChatType.PRIVATE, F.text == BTN_ADM_RESTART_BOT)
+async def btn_restart_bot(message: Message):
+    await cmd_restart_bot(message)
 
 
 @router.message(F.chat.type == ChatType.PRIVATE, F.text == BTN_ADM_CLEANUP_ON)

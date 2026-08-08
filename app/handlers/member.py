@@ -2,22 +2,21 @@
 
 from aiogram import F, Router
 from aiogram.enums import ChatType
-from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import Command
 from aiogram.types import Message
 
-from app.keyboards import BTN_COMPLAINT_CREATE, BTN_COMPLAINT_MINE, BTN_MY_NORM, BTN_MY_REST, BTN_MY_WARNS, BTN_OWNER_MSG_CREATE, BTN_OWNER_MSG_MINE
-from app.runtime import bot
+from app.keyboards import BTN_COMPLAINT_CREATE, BTN_COMPLAINT_MINE, BTN_MY_NORM, BTN_MY_REST, BTN_MY_WARNS, BTN_OWNER_MSG_CREATE, BTN_OWNER_MSG_MINE, BTN_TAKE_REST
 from app.services.chat_settings import get_group_id
 from app.services.access import is_private
+from app.services.owner_notifications import notify_owner
 from app.texts import format_user, norm_status_text, rest_status_infinite, rest_status_none, rest_status_with_days
-from config import OWNER_ID
-from db import count_active_complaints, count_active_owner_messages, create_complaint, create_owner_message, get_rest, get_user_complaints, get_user_owner_messages, get_user_warns, get_user_week_count, get_weekly_norm, user_exists_in_db
+from db import count_active_complaints, count_active_owner_messages, create_complaint, create_owner_message, get_biweekly_norm, get_rest, get_user_complaints, get_user_owner_messages, get_user_period_count, get_user_warns, user_exists_in_db
 
 router = Router()
 
 AWAITING_COMPLAINT_USERS: set[int] = set()
 AWAITING_OWNER_MESSAGE_USERS: set[int] = set()
+AWAITING_REST_REQUEST_USERS: dict[int, dict[str, str]] = {}
 
 
 def _is_target_group(message: Message) -> bool:
@@ -81,12 +80,7 @@ async def complaint_receive(message: Message):
         f"({message.from_user.id})\n"
         f"Текст: {text}"
     )
-    try:
-        await bot.send_message(OWNER_ID, owner_notice)
-    except TelegramBadRequest:
-        pass
-    except Exception:
-        pass
+    await notify_owner(owner_notice)
 
     await message.answer(f"✅ Жалоба принята. Номер: #{complaint_id}")
 
@@ -144,14 +138,60 @@ async def owner_message_receive(message: Message):
         f"({message.from_user.id})\n"
         f"Текст: {text}"
     )
-    try:
-        await bot.send_message(OWNER_ID, owner_notice)
-    except TelegramBadRequest:
-        pass
-    except Exception:
-        pass
+    await notify_owner(owner_notice)
 
     await message.answer(f"✅ Сообщение влд принято. Номер: #{owner_message_id}")
+
+
+@router.message(F.chat.type == ChatType.PRIVATE, F.text == BTN_TAKE_REST)
+@router.message(Command("take_rest"))
+async def rest_request_start(message: Message):
+    if not _is_private(message):
+        return
+    if not user_exists_in_db(message.from_user.id):
+        await message.answer("⚠️ Рест могут запросить только участники, которые есть в базе бота.")
+        return
+    AWAITING_REST_REQUEST_USERS[message.from_user.id] = {"step": "role"}
+    await message.answer("Укажите роль, с которой хотите взять рест. Для отмены: стоп/отмена.")
+
+
+@router.message(F.chat.type == ChatType.PRIVATE, F.from_user.is_not(None), F.text, F.from_user.func(lambda u: u and u.id in AWAITING_REST_REQUEST_USERS))
+async def rest_request_receive(message: Message):
+    state = AWAITING_REST_REQUEST_USERS.get(message.from_user.id)
+    if not state:
+        return
+    text = (message.text or "").strip()
+    if text.lower() in {"стоп", "отмена", "cancel", "stop"}:
+        AWAITING_REST_REQUEST_USERS.pop(message.from_user.id, None)
+        await message.answer("Заявка на рест отменена.")
+        return
+    if not text:
+        await message.answer("Ответ пустой. Напишите текстом.")
+        return
+
+    step = state["step"]
+    if step == "role":
+        state["role"] = text
+        state["step"] = "duration"
+        await message.answer("Укажите срок реста: например `3 дня`, `неделя`, `до 2026-08-20`.")
+        return
+    if step == "duration":
+        state["duration"] = text
+        state["step"] = "reason"
+        await message.answer("Укажите причину реста.")
+        return
+
+    AWAITING_REST_REQUEST_USERS.pop(message.from_user.id, None)
+    notice = (
+        "🛌 Новая заявка на рест\n"
+        f"Автор: {format_user(message.from_user.id, message.from_user.username, message.from_user.full_name)} "
+        f"({message.from_user.id})\n"
+        f"Роль: {state.get('role')}\n"
+        f"Срок: {state.get('duration')}\n"
+        f"Причина: {text}"
+    )
+    await notify_owner(notice)
+    await message.answer("✅ Заявка на рест отправлена.")
 
 
 @router.message(F.text == BTN_MY_NORM)
@@ -161,8 +201,8 @@ async def owner_message_receive(message: Message):
 async def mynorm(message: Message):
     if not (_is_private(message) or _is_target_group(message)):
         return
-    norm = get_weekly_norm()
-    count = get_user_week_count(message.from_user.id)
+    norm = get_biweekly_norm()
+    count = get_user_period_count(message.from_user.id)
     await message.answer(norm_status_text(message.from_user.id, message.from_user.username, message.from_user.full_name, count, norm))
 
 

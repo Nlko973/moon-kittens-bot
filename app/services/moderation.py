@@ -9,8 +9,8 @@ from app.keyboards import owner_third_warn_actions
 from app.runtime import bot
 from app.services.bot_config import get_int_param
 from app.services.chat_settings import get_group_id
+from app.services.owner_notifications import notify_owner
 from app.texts import owner_third_warn_notice
-from config import OWNER_ID
 from db import create_warn, get_active_warn_count, get_mute, get_user_brief, remove_mute, set_mute
 
 
@@ -138,13 +138,9 @@ async def issue_warn(
         user = get_user_brief(user_id)
         username = user["username"] if user else None
         display_name = user["display_name"] if user else str(user_id)
-        try:
-            await bot.send_message(
-                OWNER_ID,
-                owner_third_warn_notice(user_id, username, display_name, warn_id) + f"\nСтатус авто-мута: {mute_result}",
-                reply_markup=owner_third_warn_actions(user_id),
-            )
-        except TelegramBadRequest:
-            pass
+        await notify_owner(
+            owner_third_warn_notice(user_id, username, display_name, warn_id) + f"\nСтатус авто-мута: {mute_result}",
+            reply_markup=owner_third_warn_actions(user_id),
+        )
 
     return warn_id, total, third_triggered, expires_at
