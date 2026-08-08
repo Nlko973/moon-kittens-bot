@@ -1,5 +1,6 @@
 from aiogram import Dispatcher
 
+from app.handlers.access_middleware import PrivateAccessMiddleware
 from app.handlers.admin import router as admin_router
 from app.handlers.admin_dialogs import router as admin_dialogs_router
 from app.handlers.callbacks import router as callbacks_router
@@ -11,6 +12,7 @@ from app.handlers.safety_start import router as safety_start_router
 
 
 def register_handlers(dp: Dispatcher):
+    dp.message.outer_middleware(PrivateAccessMiddleware())
     dp.include_router(callbacks_router)
     dp.include_router(common_router)
     dp.include_router(member_router)

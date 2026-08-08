@@ -3,7 +3,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
 
-from config import WEEKLY_NORM_DEFAULT
+from config import FLOOD_INFO_CHANNEL_URL, WEEKLY_NORM_DEFAULT
 
 DB_PATH = Path("data/bot.db")
 DB_PATH.parent.mkdir(exist_ok=True)
@@ -180,6 +180,27 @@ def init_db():
         """
     )
 
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS bot_access_blocks (
+            user_id INTEGER PRIMARY KEY,
+            blocked_at TEXT,
+            blocked_by INTEGER
+        )
+        """
+    )
+
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS user_action_limits (
+            user_id INTEGER NOT NULL,
+            action TEXT NOT NULL,
+            last_at TEXT NOT NULL,
+            PRIMARY KEY (user_id, action)
+        )
+        """
+    )
+
     # Migration from old schema
     _ensure_column(cur, "users", "inactive_notice_at", "TEXT")
     _ensure_column(cur, "users", "inactive_warned_at", "TEXT")
@@ -211,6 +232,9 @@ def init_db():
 
     if get_setting("tg_links_block", cur) is None:
         set_setting("tg_links_block", "0", cur)
+
+    if get_setting("flood_info_channel_url", cur) is None:
+        set_setting("flood_info_channel_url", FLOOD_INFO_CHANNEL_URL, cur)
 
     if get_setting("inactive_checks_enabled", cur) is None:
         set_setting("inactive_checks_enabled", "1", cur)
@@ -333,6 +357,14 @@ def is_tg_links_block_enabled() -> bool:
 
 def set_tg_links_block_enabled(enabled: bool):
     set_setting("tg_links_block", "1" if enabled else "0")
+
+
+def get_flood_info_channel_url() -> str:
+    return get_setting("flood_info_channel_url", default="") or ""
+
+
+def set_flood_info_channel_url(url: str):
+    set_setting("flood_info_channel_url", url.strip())
 
 
 def is_inactive_checks_enabled() -> bool:
@@ -568,6 +600,78 @@ def user_exists_in_db(user_id: int, members_only: bool = False) -> bool:
     exists = cur.fetchone() is not None
     conn.close()
     return exists
+
+
+def is_bot_access_blocked(user_id: int) -> bool:
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("SELECT 1 FROM bot_access_blocks WHERE user_id = ? LIMIT 1", (user_id,))
+    blocked = cur.fetchone() is not None
+    conn.close()
+    return blocked
+
+
+def set_bot_access_block(user_id: int, blocked: bool, blocked_by: Optional[int] = None):
+    conn = get_conn()
+    cur = conn.cursor()
+    if blocked:
+        cur.execute(
+            """
+            INSERT INTO bot_access_blocks (user_id, blocked_at, blocked_by)
+            VALUES (?, ?, ?)
+            ON CONFLICT(user_id) DO UPDATE SET
+                blocked_at = excluded.blocked_at,
+                blocked_by = excluded.blocked_by
+            """,
+            (user_id, now_iso(), blocked_by),
+        )
+    else:
+        cur.execute("DELETE FROM bot_access_blocks WHERE user_id = ?", (user_id,))
+    conn.commit()
+    conn.close()
+
+
+def get_bot_access_blocks(limit: int = 300):
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT b.user_id, b.blocked_at, b.blocked_by, u.display_name, u.is_member
+        FROM bot_access_blocks b
+        LEFT JOIN users u ON u.user_id = b.user_id
+        ORDER BY b.blocked_at DESC
+        LIMIT ?
+        """,
+        (limit,),
+    )
+    rows = cur.fetchall()
+    conn.close()
+    return rows
+
+
+def get_action_last_at(user_id: int, action: str) -> Optional[str]:
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("SELECT last_at FROM user_action_limits WHERE user_id = ? AND action = ?", (user_id, action))
+    row = cur.fetchone()
+    conn.close()
+    return row["last_at"] if row else None
+
+
+def set_action_last_at(user_id: int, action: str, at: Optional[datetime] = None):
+    at = at or datetime.now()
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        INSERT INTO user_action_limits (user_id, action, last_at)
+        VALUES (?, ?, ?)
+        ON CONFLICT(user_id, action) DO UPDATE SET last_at = excluded.last_at
+        """,
+        (user_id, action, at.isoformat(timespec="seconds")),
+    )
+    conn.commit()
+    conn.close()
 
 
 def get_users_from_db(limit: int = 300):
@@ -1114,7 +1218,7 @@ def count_active_complaints(user_id: int) -> int:
 
 
 def create_complaint(user_id: int, username: Optional[str], display_name: str, text: str) -> Optional[int]:
-    if not user_exists_in_db(user_id):
+    if not user_exists_in_db(user_id, members_only=True):
         return None
     if count_active_complaints(user_id) >= 3:
         return None
@@ -1209,7 +1313,7 @@ def count_active_owner_messages(user_id: int) -> int:
 
 
 def create_owner_message(user_id: int, username: Optional[str], display_name: str, text: str) -> Optional[int]:
-    if not user_exists_in_db(user_id):
+    if not user_exists_in_db(user_id, members_only=True):
         return None
     if count_active_owner_messages(user_id) >= 3:
         return None

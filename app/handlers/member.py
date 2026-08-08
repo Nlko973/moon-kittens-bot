@@ -1,6 +1,7 @@
 ﻿from datetime import datetime
 
 from aiogram import F, Router
+from datetime import timedelta
 from aiogram.enums import ChatType
 from aiogram.filters import Command
 from aiogram.types import Message
@@ -10,13 +11,40 @@ from app.services.chat_settings import get_group_id
 from app.services.access import is_private
 from app.services.owner_notifications import notify_owner
 from app.texts import format_user, norm_status_text, rest_status_infinite, rest_status_none, rest_status_with_days
-from db import count_active_complaints, count_active_owner_messages, create_complaint, create_owner_message, get_biweekly_norm, get_rest, get_user_complaints, get_user_owner_messages, get_user_period_count, get_user_warns, user_exists_in_db
+from db import count_active_complaints, count_active_owner_messages, create_complaint, create_owner_message, get_action_last_at, get_biweekly_norm, get_rest, get_user_complaints, get_user_owner_messages, get_user_period_count, get_user_warns, set_action_last_at, user_exists_in_db
 
 router = Router()
 
 AWAITING_COMPLAINT_USERS: set[int] = set()
 AWAITING_OWNER_MESSAGE_USERS: set[int] = set()
 AWAITING_REST_REQUEST_USERS: dict[int, dict[str, str]] = {}
+
+ACTION_COMPLAINT = "complaint"
+ACTION_OWNER_MESSAGE = "owner_message"
+ACTION_REST_REQUEST = "rest_request"
+
+
+def _cooldown_left_text(user_id: int, action: str, period: timedelta) -> str | None:
+    raw = get_action_last_at(user_id, action)
+    if not raw:
+        return None
+    try:
+        last_at = datetime.fromisoformat(raw)
+    except ValueError:
+        return None
+    next_at = last_at + period
+    now = datetime.now()
+    if now >= next_at:
+        return None
+    remain = next_at - now
+    days = remain.days
+    hours = remain.seconds // 3600
+    minutes = (remain.seconds % 3600) // 60
+    if days > 0:
+        return f"{days} дн. {hours} ч."
+    if hours > 0:
+        return f"{hours} ч. {minutes} мин."
+    return f"{max(1, minutes)} мин."
 
 
 def _is_target_group(message: Message) -> bool:
@@ -34,6 +62,10 @@ async def complaint_start(message: Message):
         return
     if not user_exists_in_db(message.from_user.id):
         await message.answer("⚠️ Жалобу могут отправлять только участники, которые есть в базе бота.")
+        return
+    left = _cooldown_left_text(message.from_user.id, ACTION_COMPLAINT, timedelta(days=3))
+    if left:
+        await message.answer(f"⚠️ Жалобу можно отправлять раз в 3 дня. Осталось: {left}")
         return
     active_count = count_active_complaints(message.from_user.id)
     if active_count >= 3:
@@ -81,6 +113,7 @@ async def complaint_receive(message: Message):
         f"Текст: {text}"
     )
     await notify_owner(owner_notice)
+    set_action_last_at(message.from_user.id, ACTION_COMPLAINT)
 
     await message.answer(f"✅ Жалоба принята. Номер: #{complaint_id}")
 
@@ -92,6 +125,10 @@ async def owner_message_start(message: Message):
         return
     if not user_exists_in_db(message.from_user.id):
         await message.answer("⚠️ Сообщение влд могут отправлять только участники, которые есть в базе бота.")
+        return
+    left = _cooldown_left_text(message.from_user.id, ACTION_OWNER_MESSAGE, timedelta(days=1))
+    if left:
+        await message.answer(f"⚠️ Сообщение влд можно отправлять раз в день. Осталось: {left}")
         return
     active_count = count_active_owner_messages(message.from_user.id)
     if active_count >= 3:
@@ -139,6 +176,7 @@ async def owner_message_receive(message: Message):
         f"Текст: {text}"
     )
     await notify_owner(owner_notice)
+    set_action_last_at(message.from_user.id, ACTION_OWNER_MESSAGE)
 
     await message.answer(f"✅ Сообщение влд принято. Номер: #{owner_message_id}")
 
@@ -150,6 +188,10 @@ async def rest_request_start(message: Message):
         return
     if not user_exists_in_db(message.from_user.id):
         await message.answer("⚠️ Рест могут запросить только участники, которые есть в базе бота.")
+        return
+    left = _cooldown_left_text(message.from_user.id, ACTION_REST_REQUEST, timedelta(days=14))
+    if left:
+        await message.answer(f"⚠️ Заявку на рест можно отправлять раз в 2 недели. Осталось: {left}")
         return
     AWAITING_REST_REQUEST_USERS[message.from_user.id] = {"step": "role"}
     await message.answer("Укажите роль, с которой хотите взять рест. Для отмены: стоп/отмена.")
@@ -191,6 +233,7 @@ async def rest_request_receive(message: Message):
         f"Причина: {text}"
     )
     await notify_owner(notice)
+    set_action_last_at(message.from_user.id, ACTION_REST_REQUEST)
     await message.answer("✅ Заявка на рест отправлена.")
 
 

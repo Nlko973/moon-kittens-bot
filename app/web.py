@@ -42,12 +42,15 @@ from db import (
     get_all_rests,
     get_all_warns,
     get_biweekly_norm,
+    get_bot_access_blocks,
     get_cleanup_candidates,
     get_conn,
+    get_flood_info_channel_url,
     get_users_from_db,
     get_web_user,
     get_web_users,
     get_owner_notification_duplicate_ids,
+    set_bot_access_block,
     is_cleanup_enabled,
     is_cleanup_skip_once_enabled,
     is_inactive_checks_enabled,
@@ -59,6 +62,7 @@ from db import (
     remove_warn,
     remove_web_user,
     set_cleanup_enabled,
+    set_flood_info_channel_url,
     set_cleanup_skip_once,
     set_inactive_checks_enabled,
     set_owner_notification_duplicate_ids,
@@ -296,6 +300,7 @@ async def api_state(request: web.Request):
                 "inactive_checks_enabled": is_inactive_checks_enabled(),
                 "owner_notification_duplicate_ids": get_owner_notification_duplicate_ids(),
                 "tg_links_block": is_tg_links_block_enabled(),
+                "flood_info_channel_url": get_flood_info_channel_url(),
                 "params": get_all_params(),
             },
             "lists": {
@@ -307,6 +312,7 @@ async def api_state(request: web.Request):
                 "cleanup_candidates": _rows_to_dicts(cleanup_rows[:250]),
                 "telegram_admins": _rows_to_dicts(get_admins()),
                 "users": _rows_to_dicts(get_users_from_db(limit=400)),
+                "bot_access_blocks": _rows_to_dicts(get_bot_access_blocks(limit=300)),
                 "web_users": [
                     {**dict(row), "permissions": sorted(_json_permissions(row["permissions"]))}
                     for row in get_web_users()
@@ -344,6 +350,8 @@ async def api_config(request: web.Request):
         set_cleanup_skip_once(True)
     if "tg_links_block" in data:
         set_tg_links_block_enabled(bool(data["tg_links_block"]))
+    if "flood_info_channel_url" in data:
+        set_flood_info_channel_url(str(data.get("flood_info_channel_url") or ""))
     for name, value in (data.get("params") or {}).items():
         if name not in PARAM_DEFAULTS:
             raise web.HTTPBadRequest(text=f"Неизвестный параметр: {name}")
@@ -539,6 +547,14 @@ async def api_users(request: web.Request):
         delete_complaint(int(data.get("id")))
     elif action == "delete_owner_message":
         delete_owner_message(int(data.get("id")))
+    elif action in {"block_bot_access", "unblock_bot_access"}:
+        web_user = request["web_user"]
+        if web_user["role"] != "owner" and "users" not in web_user["permissions"]:
+            raise web.HTTPForbidden(text="РќРµРґРѕСЃС‚Р°С‚РѕС‡РЅРѕ РїСЂР°РІ")
+        user_id = await parse_target(str(data.get("target", "")).strip())
+        if not user_id:
+            raise web.HTTPBadRequest(text="РџРѕР»СЊР·РѕРІР°С‚РµР»СЊ РЅРµ РЅР°Р№РґРµРЅ")
+        set_bot_access_block(user_id, action == "block_bot_access", _issued_by(web_user))
     else:
         raise web.HTTPBadRequest(text="Неизвестное действие")
     return web.json_response({"ok": True})
@@ -750,7 +766,7 @@ function show(id) {
   title.textContent = sections.find(s => s[0] === id)[1];
 }
 async function loadState() { state = await api('/api/state'); renderAll(); }
-function renderAll() { renderDashboard(); renderModeration(); renderRests(); renderSettings(); renderBroadcast(); renderMessages(); renderCleanup(); renderUsers(); renderAdmins(); }
+function renderAll() { renderDashboard(); renderModeration(); renderRests(); renderSettings(); renderBroadcast(); renderMessages(); renderCleanup(); renderUsers(); renderBotAccessPanel(); renderAdmins(); }
 function stat(label, value) { return `<div class="card stat"><span class="muted">${label}</span><b>${esc(value)}</b></div>`; }
 function tableCard(name, rows, cols) {
   const cell = (row, col) => col === 'action' ? (row[col] || '') : esc(row[col]);
@@ -802,6 +818,7 @@ function renderSettings() {
   settings.innerHTML = `<form class="card" onsubmit="saveConfig(event,this)"><h3>Основные настройки</h3>
     <div class="grid three"><div><label>GROUP_ID</label><input name="group_id" value="${esc(c.group_id)}"></div><div><label>Норма за 2 недели</label><input name="norm_2w" value="${esc(c.norm_2w)}"></div><div><label>TG-ссылки</label><select name="tg_links_block"><option value="0">Разрешены</option><option value="1" ${c.tg_links_block?'selected':''}>Запрещены</option></select></div></div>
     <label>Дублировать ЛС влд для Telegram ID</label><input name="owner_notification_duplicate_ids" value="${esc((c.owner_notification_duplicate_ids || []).join(', '))}" placeholder="123456789, 987654321">
+    <label>Ссылка на инфо канал флуда</label><input name="flood_info_channel_url" value="${esc(c.flood_info_channel_url || '')}" placeholder="https://t.me/...">
     <div class="perm-grid">${duplicateAdmins}</div>
     <div class="grid three">${Object.entries(params).map(([k,v])=>`<div><label>${esc(k)}</label><input name="param_${esc(k)}" value="${esc(v)}"></div>`).join('')}</div>
     <div class="row" style="margin-top:12px"><label class="check"><input type="checkbox" name="cleanup_enabled" ${c.cleanup_enabled?'checked':''}> Авточистка</label><label class="check"><input type="checkbox" name="inactive_checks_enabled" ${c.inactive_checks_enabled?'checked':''}> Уведомления и варны за неактив</label><label class="check"><input type="checkbox" name="cleanup_skip_once"> Пропустить ближайшую чистку</label></div><div class="row"><button>Сохранить</button><button type="button" class="danger" onclick="restartBot()">Перезагрузить бота</button></div></form>`;
@@ -811,7 +828,7 @@ async function saveConfig(event, form) {
   const fd = new FormData(form), params = {};
   for (const [k,v] of fd.entries()) if (k.startsWith('param_')) params[k.slice(6)] = v;
   const duplicateIds = [fd.get('owner_notification_duplicate_ids'), ...fd.getAll('duplicate_admin_ids')].filter(Boolean).join(', ');
-  await post('/api/config', {group_id:fd.get('group_id'), norm_2w:fd.get('norm_2w'), owner_notification_duplicate_ids:duplicateIds, tg_links_block:fd.get('tg_links_block') === '1', cleanup_enabled:fd.has('cleanup_enabled'), inactive_checks_enabled:fd.has('inactive_checks_enabled'), cleanup_skip_once:fd.has('cleanup_skip_once'), params});
+  await post('/api/config', {group_id:fd.get('group_id'), norm_2w:fd.get('norm_2w'), owner_notification_duplicate_ids:duplicateIds, tg_links_block:fd.get('tg_links_block') === '1', flood_info_channel_url:fd.get('flood_info_channel_url'), cleanup_enabled:fd.has('cleanup_enabled'), inactive_checks_enabled:fd.has('inactive_checks_enabled'), cleanup_skip_once:fd.has('cleanup_skip_once'), params});
   toastMsg('Конфиг сохранён'); await loadState();
 }
 async function restartBot() {
@@ -845,6 +862,14 @@ function renderUsers() {
 async function deleteDbUser(userId) { await post('/api/users', {action:'delete', user_id:userId}); toastMsg('Пользователь удалён из БД'); await loadState(); }
 async function deleteComplaint(id) { await post('/api/users', {action:'delete_complaint', id}); toastMsg('Жалоба закрыта'); await loadState(); }
 async function deleteOwnerMsg(id) { await post('/api/users', {action:'delete_owner_message', id}); toastMsg('Сообщение закрыто'); await loadState(); }
+async function blockBotAccess(event, form) { event.preventDefault(); const fd = new FormData(form); await post('/api/users', {action:fd.get('action'), target:fd.get('target')}); toastMsg('Доступ к боту обновлён'); form.reset(); await loadState(); }
+async function unblockBotAccess(target) { await post('/api/users', {action:'unblock_bot_access', target}); toastMsg('Доступ к боту открыт'); await loadState(); }
+function renderBotAccessPanel() {
+  if (!can('users') || !users) return;
+  const form = `<form class="card" onsubmit="blockBotAccess(event,this)"><h3>Заблокировать/разблокировать доступ к боту</h3><div class="grid three"><div><label>ID или @username</label><input name="target" required></div><div><label>Действие</label><select name="action"><option value="block_bot_access">Заблокировать</option><option value="unblock_bot_access">Разблокировать</option></select></div></div><button>Применить</button></form>`;
+  const rows = (state.lists.bot_access_blocks || []).map(r => ({...r, action:`<button onclick="unblockBotAccess('${esc(r.user_id)}')">Разблокировать</button>`}));
+  users.insertAdjacentHTML('afterbegin', form + tableCard('Заблокированы в боте', rows, ['user_id','display_name','blocked_at','blocked_by','action']));
+}
 function renderMessages() {
   if (!can('messages')) return;
   const complaints = state.lists.complaints.map(r => ({...r, action:`<button class="danger" onclick="deleteComplaint('${esc(r.id)}')">Закрыть</button>`}));
