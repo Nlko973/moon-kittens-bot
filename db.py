@@ -522,6 +522,15 @@ def mark_users_seen_first_cleanup(user_ids: list[int], at: Optional[datetime] = 
     conn.close()
 
 
+def set_user_new_status(user_id: int, is_new: bool, at: Optional[datetime] = None):
+    value = None if is_new else (at or datetime.now()).isoformat(timespec="seconds")
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("UPDATE users SET first_cleanup_at = ?, updated_at = ? WHERE user_id = ?", (value, now_iso(), user_id))
+    conn.commit()
+    conn.close()
+
+
 def mark_user_left(user_id: int):
     conn = get_conn()
     cur = conn.cursor()
@@ -720,7 +729,7 @@ def get_users_from_db(limit: int = 300):
     cur = conn.cursor()
     cur.execute(
         """
-        SELECT user_id, username, display_name, is_member, first_seen_at, last_message_at, updated_at
+        SELECT user_id, username, display_name, is_member, first_seen_at, first_cleanup_at, last_message_at, updated_at
         FROM users
         ORDER BY is_member DESC, COALESCE(updated_at, first_seen_at, '') DESC
         LIMIT ?

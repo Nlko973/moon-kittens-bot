@@ -69,6 +69,7 @@ from db import (
     set_rest_until,
     set_tg_links_block_enabled,
     set_biweekly_norm,
+    set_user_new_status,
     upsert_web_user,
 )
 
@@ -538,27 +539,35 @@ def _uploaded_media(upload: Any) -> BufferedInputFile:
     return BufferedInputFile(content, filename=filename)
 
 
-@_require_any("users", "messages")
+@_require_any("users", "messages", "moderation")
 async def api_users(request: web.Request):
     data = await _payload(request)
     action = data.get("action")
+    web_user = request["web_user"]
     if action == "delete":
-        web_user = request["web_user"]
         if web_user["role"] != "owner" and "users" not in web_user["permissions"]:
             raise web.HTTPForbidden(text="Недостаточно прав")
         purge_user_from_db(int(data.get("user_id")))
     elif action == "delete_complaint":
+        if web_user["role"] != "owner" and "messages" not in web_user["permissions"] and "users" not in web_user["permissions"]:
+            raise web.HTTPForbidden(text="Недостаточно прав")
         delete_complaint(int(data.get("id")))
     elif action == "delete_owner_message":
+        if web_user["role"] != "owner" and "messages" not in web_user["permissions"] and "users" not in web_user["permissions"]:
+            raise web.HTTPForbidden(text="Недостаточно прав")
         delete_owner_message(int(data.get("id")))
     elif action in {"block_bot_access", "unblock_bot_access"}:
-        web_user = request["web_user"]
-        if web_user["role"] != "owner" and "users" not in web_user["permissions"]:
+        if web_user["role"] != "owner" and "moderation" not in web_user["permissions"]:
             raise web.HTTPForbidden(text="РќРµРґРѕСЃС‚Р°С‚РѕС‡РЅРѕ РїСЂР°РІ")
         user_id = await parse_target(str(data.get("target", "")).strip())
         if not user_id:
             raise web.HTTPBadRequest(text="РџРѕР»СЊР·РѕРІР°С‚РµР»СЊ РЅРµ РЅР°Р№РґРµРЅ")
         set_bot_access_block(user_id, action == "block_bot_access", _issued_by(web_user))
+    elif action in {"set_new_status", "unset_new_status"}:
+        if web_user["role"] != "owner" and "users" not in web_user["permissions"]:
+            raise web.HTTPForbidden(text="Недостаточно прав")
+        user_id = int(data.get("user_id"))
+        set_user_new_status(user_id, action == "set_new_status")
     else:
         raise web.HTTPBadRequest(text="Неизвестное действие")
     return web.json_response({"ok": True})
@@ -706,6 +715,7 @@ APP_HTML = """
     button.secondary { background:var(--panel2); color:var(--text); border:1px solid var(--line); }
     button.danger { background:var(--danger); color:#270b0e; }
     .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+    .actions { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
     .toolbar input { max-width:280px; }
     table { width:100%; border-collapse:collapse; table-layout:fixed; }
     th, td { padding:10px; border-bottom:1px solid var(--line); text-align:left; vertical-align:top; overflow-wrap:anywhere; }
@@ -770,7 +780,7 @@ function show(id) {
   title.textContent = sections.find(s => s[0] === id)[1];
 }
 async function loadState() { state = await api('/api/state'); renderAll(); }
-function renderAll() { renderDashboard(); renderModeration(); renderRests(); renderSettings(); renderBroadcast(); renderMessages(); renderCleanup(); renderUsers(); renderBotAccessPanel(); renderAdmins(); }
+function renderAll() { renderDashboard(); renderModeration(); renderRests(); renderSettings(); renderBroadcast(); renderMessages(); renderCleanup(); renderUsers(); renderAdmins(); }
 function stat(label, value) { return `<div class="card stat"><span class="muted">${label}</span><b>${esc(value)}</b></div>`; }
 function tableCard(name, rows, cols) {
   const cell = (row, col) => col === 'action' ? (row[col] || '') : esc(row[col]);
@@ -783,6 +793,7 @@ function renderDashboard() {
 }
 function renderModeration() {
   if (!can('moderation')) return;
+  const blockedRows = (state.lists.bot_access_blocks || []).map(r => ({...r, action:`<button onclick="unblockBotAccess('${esc(r.user_id)}')">Разблокировать</button>`}));
   moderation.innerHTML = `<div class="grid three">
     ${modForm('Выдать варн','warnForm',[['target','ID или @username'],['duration','Срок: месяц, 7 дней, 2026-08-01'],['reason','Причина']],'warn')}
     ${modForm('Мут','muteForm',[['target','ID или @username'],['duration','Срок: 30 минут, 2 часа'],['reason','Причина']],'mute')}
@@ -791,7 +802,7 @@ function renderModeration() {
   <div class="card"><h3>Быстрые действия</h3><div class="row toolbar">
     <input id="quickTarget" placeholder="ID или @username"><input id="quickWarn" placeholder="warn_id">
     <button onclick="quick('unwarn')">Снять варн</button><button onclick="quick('unmute')">Размут</button><button onclick="quick('ban')">Бан</button><button onclick="quick('unban')">Разбан</button><button onclick="quick('kick')">Кик</button><button onclick="quick('role_remove')">Снять роль</button>
-  </div></div>${tableCard('Муты', state.lists.mutes, ['user_id','display_name','until_at','reason','issued_by'])}`;
+  </div></div><form class="card" onsubmit="blockBotAccess(event,this)"><h3>Заблокировать/разблокировать доступ к боту</h3><div class="grid three"><div><label>ID или @username</label><input name="target" required></div><div><label>Действие</label><select name="action"><option value="block_bot_access">Заблокировать</option><option value="unblock_bot_access">Разблокировать</option></select></div></div><button style="margin-top:12px">Применить</button></form>${tableCard('Заблокированы в боте', blockedRows, ['user_id','display_name','blocked_at','blocked_by','action'])}${tableCard('Муты', state.lists.mutes, ['user_id','display_name','until_at','reason','issued_by'])}`;
 }
 function modForm(title, id, fields, action) {
   return `<form class="card" id="${id}" onsubmit="submitModeration(event,'${action}',this)"><h3>${title}</h3>${fields.map(f=>`<label>${f[1]}</label><input name="${f[0]}">`).join('')}<button>Выполнить</button></form>`;
@@ -858,22 +869,17 @@ async function sendBroadcast(event, form) {
 }
 function renderUsers() {
   if (!can('users')) return;
-  const dbUsers = state.lists.users.map(r => ({...r, action:`<button class="danger" onclick="deleteDbUser('${esc(r.user_id)}')">Удалить</button>`}));
+  const dbUsers = state.lists.users.map(r => ({...r, new_status:!r.first_cleanup_at ? '🆕 нью' : '', action:`<div class="actions"><button onclick="toggleNewStatus('${esc(r.user_id)}', ${r.first_cleanup_at ? 'true' : 'false'})">${r.first_cleanup_at ? 'Добавить нью' : 'Снять нью'}</button><button class="danger" onclick="deleteDbUser('${esc(r.user_id)}')">Удалить</button></div>`}));
   const complaints = state.lists.complaints.map(r => ({...r, action:`<button class="danger" onclick="deleteComplaint('${esc(r.id)}')">Закрыть</button>`}));
   const ownerMsgs = state.lists.owner_messages.map(r => ({...r, action:`<button class="danger" onclick="deleteOwnerMsg('${esc(r.id)}')">Закрыть</button>`}));
-  users.innerHTML = `${tableCard('Участники в БД', dbUsers, ['user_id','display_name','is_member','first_seen_at','last_message_at','action'])}${tableCard('Жалобы', complaints, ['id','user_id','display_name','text','created_at','action'])}${tableCard('Сообщения владельцу', ownerMsgs, ['id','user_id','display_name','text','created_at','action'])}`;
+  users.innerHTML = `${tableCard('Участники в БД', dbUsers, ['user_id','display_name','is_member','first_seen_at','new_status','last_message_at','action'])}${tableCard('Жалобы', complaints, ['id','user_id','display_name','text','created_at','action'])}${tableCard('Сообщения владельцу', ownerMsgs, ['id','user_id','display_name','text','created_at','action'])}`;
 }
 async function deleteDbUser(userId) { await post('/api/users', {action:'delete', user_id:userId}); toastMsg('Пользователь удалён из БД'); await loadState(); }
+async function toggleNewStatus(userId, makeNew) { await post('/api/users', {action:makeNew ? 'set_new_status' : 'unset_new_status', user_id:userId}); toastMsg(makeNew ? 'Статус нью добавлен' : 'Статус нью снят'); await loadState(); }
 async function deleteComplaint(id) { await post('/api/users', {action:'delete_complaint', id}); toastMsg('Жалоба закрыта'); await loadState(); }
 async function deleteOwnerMsg(id) { await post('/api/users', {action:'delete_owner_message', id}); toastMsg('Сообщение закрыто'); await loadState(); }
 async function blockBotAccess(event, form) { event.preventDefault(); const fd = new FormData(form); await post('/api/users', {action:fd.get('action'), target:fd.get('target')}); toastMsg('Доступ к боту обновлён'); form.reset(); await loadState(); }
 async function unblockBotAccess(target) { await post('/api/users', {action:'unblock_bot_access', target}); toastMsg('Доступ к боту открыт'); await loadState(); }
-function renderBotAccessPanel() {
-  if (!can('users') || !users) return;
-  const form = `<form class="card" onsubmit="blockBotAccess(event,this)"><h3>Заблокировать/разблокировать доступ к боту</h3><div class="grid three"><div><label>ID или @username</label><input name="target" required></div><div><label>Действие</label><select name="action"><option value="block_bot_access">Заблокировать</option><option value="unblock_bot_access">Разблокировать</option></select></div></div><button>Применить</button></form>`;
-  const rows = (state.lists.bot_access_blocks || []).map(r => ({...r, action:`<button onclick="unblockBotAccess('${esc(r.user_id)}')">Разблокировать</button>`}));
-  users.insertAdjacentHTML('afterbegin', form + tableCard('Заблокированы в боте', rows, ['user_id','display_name','blocked_at','blocked_by','action']));
-}
 function renderMessages() {
   if (!can('messages')) return;
   const complaints = state.lists.complaints.map(r => ({...r, action:`<button class="danger" onclick="deleteComplaint('${esc(r.id)}')">Закрыть</button>`}));
@@ -883,7 +889,7 @@ function renderMessages() {
 function renderCleanup() {
   if (!can('cleanup')) return;
   const c = state.config;
-  const rows = (state.lists.cleanup_candidates || []).map(r => ({...r, status:!r.first_cleanup_at ? 'новенький' : (Number(r.count || 0) >= Number(c.norm_2w || 0) ? 'ok' : 'ниже нормы')}));
+  const rows = (state.lists.cleanup_candidates || []).map(r => ({...r, status:!r.first_cleanup_at ? '🆕 нью' : (Number(r.count || 0) >= Number(c.norm_2w || 0) ? 'ok' : 'ниже нормы')}));
   cleanup.innerHTML = `<form class="card" onsubmit="saveCleanup(event,this)"><h3>Чистка</h3><div class="row"><label class="check"><input type="checkbox" name="cleanup_enabled" ${c.cleanup_enabled?'checked':''}> Авточистка включена</label><label class="check"><input type="checkbox" name="cleanup_skip_once"> Пропустить ближайшую чистку</label><button>Сохранить</button></div></form>${tableCard('Кандидаты по норме', rows, ['user_id','display_name','first_seen_at','count','status'])}`;
 }
 async function saveCleanup(event, form) {

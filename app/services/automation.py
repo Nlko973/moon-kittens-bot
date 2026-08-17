@@ -97,7 +97,7 @@ async def _send_friday_lacking_report():
     ]
     for idx, row in enumerate(lacking[:80], start=1):
         newcomer_mark = (
-            " · новичок (до первой чистки)"
+            " · 🆕 нью"
             if _is_newcomer(row)
             else ""
         )
@@ -198,7 +198,7 @@ async def run_week_cleanup():
             user_label = await resolve_user_label(row["user_id"], row["display_name"])
             lines.append(f"- #{warn_id} {user_label}: {row['count']}/{norm}")
         if skipped_newcomers:
-            lines.append(f"Новички (до первой чистки) без варна: {len(skipped_newcomers)}.")
+            lines.append(f"🆕 нью без варна: {len(skipped_newcomers)}.")
         await _send_chunked(group_id, lines)
     else:
         extra = ""
@@ -211,7 +211,7 @@ async def run_week_cleanup():
         f"Норма: {norm} за период",
         f"Всего участников в учете: {len(rows)}",
         f"Выдано варнов: {len(punished)}",
-        f"Пропущено новичков (до первой чистки): {len(skipped_newcomers)}",
+        f"Пропущено 🆕 нью: {len(skipped_newcomers)}",
     ]
     if punished:
         owner_lines.append("Список с варнами:")
