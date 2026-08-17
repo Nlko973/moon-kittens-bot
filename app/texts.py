@@ -2,6 +2,8 @@
 from html import escape
 from typing import Optional
 
+from db import cleanup_period_bounds
+
 APP_NAME = "Moon Kittens Bot"
 
 ACCESS_DENIED = "нет доступа"
@@ -67,9 +69,7 @@ def week_period(now: datetime) -> str:
 
 
 def cleanup_period(now: datetime) -> str:
-    current_monday = now.date() - timedelta(days=now.weekday())
-    start = current_monday - timedelta(days=7)
-    end = current_monday + timedelta(days=6)
+    start, end = cleanup_period_bounds(now)
     return f"{start.isoformat()} - {end.isoformat()}"
 
 

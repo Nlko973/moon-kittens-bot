@@ -279,7 +279,11 @@ async def api_me(request: web.Request):
 async def api_state(request: web.Request):
     norm_2w = get_biweekly_norm()
     cleanup_rows = get_cleanup_candidates()
-    lacking = sum(1 for row in cleanup_rows if int(row["count"] or 0) < norm_2w)
+    lacking = sum(
+        1
+        for row in cleanup_rows
+        if row["first_cleanup_at"] and int(row["count"] or 0) < norm_2w
+    )
     return web.json_response(
         {
             "summary": {
@@ -879,7 +883,7 @@ function renderMessages() {
 function renderCleanup() {
   if (!can('cleanup')) return;
   const c = state.config;
-  const rows = (state.lists.cleanup_candidates || []).map(r => ({...r, status:Number(r.count || 0) >= Number(c.norm_2w || 0) ? 'ok' : 'ниже нормы'}));
+  const rows = (state.lists.cleanup_candidates || []).map(r => ({...r, status:!r.first_cleanup_at ? 'новенький' : (Number(r.count || 0) >= Number(c.norm_2w || 0) ? 'ok' : 'ниже нормы')}));
   cleanup.innerHTML = `<form class="card" onsubmit="saveCleanup(event,this)"><h3>Чистка</h3><div class="row"><label class="check"><input type="checkbox" name="cleanup_enabled" ${c.cleanup_enabled?'checked':''}> Авточистка включена</label><label class="check"><input type="checkbox" name="cleanup_skip_once"> Пропустить ближайшую чистку</label><button>Сохранить</button></div></form>${tableCard('Кандидаты по норме', rows, ['user_id','display_name','first_seen_at','count','status'])}`;
 }
 async function saveCleanup(event, form) {

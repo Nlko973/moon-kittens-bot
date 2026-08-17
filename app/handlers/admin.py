@@ -173,7 +173,10 @@ async def cmd_norm_stats(message: Message):
         f"🧹 {_cleanup_status_text()}",
     ]
     for row in rows[:200]:
-        mark = "✅" if row["count"] >= norm else "❌"
+        if not row["first_cleanup_at"]:
+            mark = "новенький"
+        else:
+            mark = "✅" if row["count"] >= norm else "❌"
         user_label = await resolve_user_label(row["user_id"], row["display_name"])
         lines.append(f"{user_label} - {row['count']}/{norm} {mark}")
     await message.answer("\n".join(lines))

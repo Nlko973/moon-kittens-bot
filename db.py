@@ -22,12 +22,36 @@ def week_start_for(dt: Optional[datetime] = None) -> str:
 
 
 def cleanup_week_starts_for(dt: Optional[datetime] = None) -> list[str]:
-    dt = dt or datetime.now()
-    monday = dt.date() - timedelta(days=dt.weekday())
+    _start, end = cleanup_period_bounds(dt)
+    monday = end - timedelta(days=end.weekday())
     return [
         (monday - timedelta(days=7 * offset)).isoformat()
         for offset in range(CLEANUP_PERIOD_WEEKS - 1, -1, -1)
     ]
+
+
+def cleanup_period_bounds(dt: Optional[datetime] = None) -> tuple[datetime.date, datetime.date]:
+    dt = dt or datetime.now()
+    end = _cleanup_period_end_for(dt)
+    start = end - timedelta(days=CLEANUP_INTERVAL_DAYS - 1)
+    return start, end
+
+
+def _cleanup_period_end_for(dt: datetime) -> datetime.date:
+    last_cleanup_date = get_last_cleanup_date()
+    if last_cleanup_date:
+        try:
+            last_dt = datetime.fromisoformat(last_cleanup_date)
+            if dt.date() >= last_dt.date():
+                next_end = last_dt.date() + timedelta(days=CLEANUP_INTERVAL_DAYS)
+                while dt.date() > next_end:
+                    next_end += timedelta(days=CLEANUP_INTERVAL_DAYS)
+                return next_end
+        except ValueError:
+            pass
+
+    days_ahead = (6 - dt.weekday()) % 7
+    return dt.date() + timedelta(days=days_ahead)
 
 
 def get_conn():
@@ -62,6 +86,7 @@ def init_db():
             last_message_at TEXT,
             inactive_notice_at TEXT,
             inactive_warned_at TEXT,
+            first_cleanup_at TEXT,
             updated_at TEXT
         )
         """
@@ -205,6 +230,7 @@ def init_db():
     _ensure_column(cur, "users", "inactive_notice_at", "TEXT")
     _ensure_column(cur, "users", "inactive_warned_at", "TEXT")
     _ensure_column(cur, "users", "first_seen_at", "TEXT")
+    _ensure_column(cur, "users", "first_cleanup_at", "TEXT")
     _ensure_column(cur, "warns", "expires_at", "TEXT")
     _ensure_column(cur, "complaints", "active", "INTEGER DEFAULT 1")
     _ensure_column(cur, "owner_messages", "active", "INTEGER DEFAULT 1")
@@ -477,6 +503,21 @@ def add_message(user_id: int, username: Optional[str], display_name: str, at: Op
         (week_start, user_id),
     )
 
+    conn.commit()
+    conn.close()
+
+
+def mark_users_seen_first_cleanup(user_ids: list[int], at: Optional[datetime] = None):
+    if not user_ids:
+        return
+    at_iso = (at or datetime.now()).isoformat(timespec="seconds")
+    placeholders = ",".join("?" for _ in user_ids)
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        f"UPDATE users SET first_cleanup_at = COALESCE(first_cleanup_at, ?) WHERE user_id IN ({placeholders})",
+        (at_iso, *user_ids),
+    )
     conn.commit()
     conn.close()
 
@@ -1135,7 +1176,8 @@ def get_cleanup_candidates(week_starts: Optional[list[str] | str] = None):
     cur = conn.cursor()
     cur.execute(
         f"""
-        SELECT u.user_id, u.username, u.display_name, u.first_seen_at, COALESCE(w.count, 0) AS count
+        SELECT u.user_id, u.username, u.display_name, u.first_seen_at, u.first_cleanup_at,
+               COALESCE(w.count, 0) AS count
         FROM users u
         LEFT JOIN (
             SELECT user_id, SUM(count) AS count
