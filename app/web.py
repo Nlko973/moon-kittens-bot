@@ -393,15 +393,18 @@ async def api_web_users(request: web.Request):
             raise web.HTTPBadRequest(text="Владельца нельзя удалить")
         remove_web_user(username)
         return web.json_response({"ok": True})
+    if username == WEB_OWNER_LOGIN:
+        raise web.HTTPBadRequest(text="Владельца нельзя редактировать")
 
     password = str(data.get("password", ""))
-    if action != "save" or not password:
+    existing_user = get_web_user(username)
+    if action != "save" or (not password and not existing_user):
         raise web.HTTPBadRequest(text="Нужен пароль")
     permissions = [p for p in data.get("permissions", []) if p in ALL_PERMISSIONS]
     telegram_admin_id = data.get("telegram_admin_id")
     upsert_web_user(
         username=username,
-        password_hash=_hash_password(password),
+        password_hash=_hash_password(password) if password else existing_user["password_hash"],
         role="admin",
         display_name=str(data.get("display_name") or username),
         telegram_admin_id=int(telegram_admin_id) if telegram_admin_id else None,
@@ -716,6 +719,8 @@ APP_HTML = """
     button.danger { background:var(--danger); color:#270b0e; }
     .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
     .actions { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+    form.card > button { margin-top:14px; }
+    form.card > .row:last-child { margin-top:14px; }
     .toolbar input { max-width:280px; }
     table { width:100%; border-collapse:collapse; table-layout:fixed; }
     th, td { padding:10px; border-bottom:1px solid var(--line); text-align:left; vertical-align:top; overflow-wrap:anywhere; }
@@ -904,10 +909,22 @@ function renderAdmins() {
   const labels = state.permission_labels;
   const perms = state.permissions.map(p => `<label class="check"><input type="checkbox" name="permissions" value="${p}"> ${esc(labels[p] || p)}</label>`).join('');
   const tgAdmins = state.lists.telegram_admins.map(r => ({...r, action:`<button class="danger" onclick="removeTgAdmin('${esc(r.user_id)}')">Удалить</button>`}));
-  const webUsers = state.lists.web_users.map(r => ({...r, permissions:(r.permissions || []).map(p => labels[p] || p).join(', '), action:r.role === 'owner' ? '' : `<button class="danger" onclick="removeWebUser('${esc(r.username)}')">Удалить</button>`}));
+  const webUsers = state.lists.web_users.map(r => ({...r, permissions:(r.permissions || []).map(p => labels[p] || p).join(', '), action:r.role === 'owner' ? '' : `<div class="actions"><button type="button" onclick="editWebUser('${esc(r.username)}')">Редактировать</button><button class="danger" onclick="removeWebUser('${esc(r.username)}')">Удалить</button></div>`}));
   admins.innerHTML = `<div class="grid two"><form class="card" onsubmit="saveTgAdmin(event,this)"><h3>Telegram-админ</h3><label>User ID</label><input name="user_id"><label>Имя</label><input name="name"><button>Добавить</button></form>
-  <form class="card" onsubmit="saveWebUser(event,this)"><h3>Веб-доступ администратора</h3><label>Логин</label><input name="username"><label>Пароль</label><input name="password" type="password"><label>Имя</label><input name="display_name"><label>Telegram admin ID</label><input name="telegram_admin_id"><div class="perm-grid">${perms}</div><button>Сохранить</button></form></div>
+  <form class="card" id="webUserForm" onsubmit="saveWebUser(event,this)"><h3>Веб-доступ администратора</h3><label>Логин</label><input name="username"><label>Пароль</label><input name="password" type="password"><label>Имя</label><input name="display_name"><label>Telegram admin ID</label><input name="telegram_admin_id"><div class="perm-grid">${perms}</div><button>Сохранить</button></form></div>
   <div class="grid two">${tableCard('Telegram-админы', tgAdmins, ['user_id','name','action'])}${tableCard('Веб-пользователи', webUsers, ['username','role','display_name','telegram_admin_id','permissions','action'])}</div>`;
+}
+function editWebUser(username) {
+  const row = state.lists.web_users.find(u => String(u.username) === String(username));
+  const form = document.getElementById('webUserForm');
+  if (!row || !form) return;
+  form.elements.username.value = row.username || '';
+  form.elements.password.value = '';
+  form.elements.display_name.value = row.display_name || '';
+  form.elements.telegram_admin_id.value = row.telegram_admin_id || '';
+  const selected = new Set(row.permissions || []);
+  form.querySelectorAll('input[name="permissions"]').forEach(input => input.checked = selected.has(input.value));
+  form.scrollIntoView({behavior:'smooth', block:'start'});
 }
 async function saveTgAdmin(event, form) { event.preventDefault(); await post('/api/telegram-admins', {...Object.fromEntries(new FormData(form).entries()), action:'add'}); toastMsg('Админ добавлен'); await loadState(); }
 async function saveWebUser(event, form) { event.preventDefault(); const fd = new FormData(form); await post('/api/web-users', {action:'save', username:fd.get('username'), password:fd.get('password'), display_name:fd.get('display_name'), telegram_admin_id:fd.get('telegram_admin_id'), permissions:fd.getAll('permissions')}); toastMsg('Веб-доступ сохранён'); await loadState(); }
