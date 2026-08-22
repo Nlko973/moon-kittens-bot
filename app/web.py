@@ -721,6 +721,18 @@ APP_HTML = """
     .actions { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
     form.card > button { margin-top:14px; }
     form.card > .row:last-child { margin-top:14px; }
+    .admin-tables { grid-template-columns:minmax(320px,.7fr) minmax(680px,1.3fr); align-items:start; }
+    .web-users-table { overflow-x:auto; }
+    .web-users-table table { table-layout:auto; }
+    .web-users-table th:nth-child(1) { width:120px; }
+    .web-users-table th:nth-child(2) { width:82px; }
+    .web-users-table th:nth-child(3) { width:150px; }
+    .web-users-table th:nth-child(4) { width:120px; }
+    .web-users-table th:nth-child(6) { width:150px; }
+    .web-users-table td { overflow-wrap:normal; word-break:normal; }
+    .permission-pills { display:flex; gap:6px; flex-wrap:wrap; align-items:flex-start; }
+    .web-users-table .actions { flex-direction:column; align-items:stretch; gap:8px; }
+    .web-users-table .actions button { width:100%; padding:0 10px; font-size:13px; }
     .toolbar input { max-width:280px; }
     table { width:100%; border-collapse:collapse; table-layout:fixed; }
     th, td { padding:10px; border-bottom:1px solid var(--line); text-align:left; vertical-align:top; overflow-wrap:anywhere; }
@@ -728,9 +740,9 @@ APP_HTML = """
     .perm-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:6px 12px; margin:10px 0; }
     .check { display:flex; gap:8px; align-items:center; margin:0; }
     .check input { width:auto; min-height:auto; }
-    .pill { display:inline-flex; align-items:center; min-height:24px; border-radius:8px; padding:0 8px; background:#151b23; border:1px solid var(--line); color:var(--muted); margin:2px; font-size:12px; }
+    .pill { display:inline-flex; align-items:center; min-height:24px; border-radius:8px; padding:0 8px; background:#151b23; border:1px solid var(--line); color:var(--muted); margin:2px; font-size:12px; line-height:1.2; }
     .toast { position:fixed; right:18px; bottom:18px; max-width:min(420px,calc(100vw - 36px)); background:#111720; border:1px solid var(--line); border-radius:8px; padding:12px 14px; box-shadow:0 16px 60px rgba(0,0,0,.4); display:none; }
-    @media (max-width:900px) { .shell { grid-template-columns:1fr; } aside { position:relative; height:auto; } .stats,.two,.three,.perm-grid { grid-template-columns:1fr; } header { align-items:flex-start; flex-direction:column; } }
+    @media (max-width:900px) { .shell { grid-template-columns:1fr; } aside { position:relative; height:auto; } .stats,.two,.three,.perm-grid,.admin-tables { grid-template-columns:1fr; } header { align-items:flex-start; flex-direction:column; } }
   </style>
 </head>
 <body>
@@ -790,6 +802,10 @@ function stat(label, value) { return `<div class="card stat"><span class="muted"
 function tableCard(name, rows, cols) {
   const cell = (row, col) => col === 'action' ? (row[col] || '') : esc(row[col]);
   return `<div class="card"><h3>${esc(name)}</h3><table><thead><tr>${cols.map(c=>`<th>${esc(c)}</th>`).join('')}</tr></thead><tbody>${rows.slice(0,60).map(r=>`<tr>${cols.map(c=>`<td>${cell(r,c)}</td>`).join('')}</tr>`).join('') || `<tr><td colspan="${cols.length}" class="muted">Пусто</td></tr>`}</tbody></table></div>`;
+}
+function customTableCard(name, rows, cols, className='') {
+  const cell = (row, col) => col.html ? (row[col.key] || '') : esc(row[col.key]);
+  return `<div class="card ${className}"><h3>${esc(name)}</h3><table><thead><tr>${cols.map(c=>`<th>${esc(c.label)}</th>`).join('')}</tr></thead><tbody>${rows.slice(0,60).map(r=>`<tr>${cols.map(c=>`<td>${cell(r,c)}</td>`).join('')}</tr>`).join('') || `<tr><td colspan="${cols.length}" class="muted">Пусто</td></tr>`}</tbody></table></div>`;
 }
 function renderDashboard() {
   const s = state.summary;
@@ -909,10 +925,22 @@ function renderAdmins() {
   const labels = state.permission_labels;
   const perms = state.permissions.map(p => `<label class="check"><input type="checkbox" name="permissions" value="${p}"> ${esc(labels[p] || p)}</label>`).join('');
   const tgAdmins = state.lists.telegram_admins.map(r => ({...r, action:`<button class="danger" onclick="removeTgAdmin('${esc(r.user_id)}')">Удалить</button>`}));
-  const webUsers = state.lists.web_users.map(r => ({...r, permissions:(r.permissions || []).map(p => labels[p] || p).join(', '), action:r.role === 'owner' ? '' : `<div class="actions"><button type="button" onclick="editWebUser('${esc(r.username)}')">Редактировать</button><button class="danger" onclick="removeWebUser('${esc(r.username)}')">Удалить</button></div>`}));
+  const webUserCols = [
+    {key:'username', label:'Логин'},
+    {key:'role', label:'Роль'},
+    {key:'display_name', label:'Имя'},
+    {key:'telegram_admin_id', label:'Telegram ID'},
+    {key:'permissions', label:'Доступы', html:true},
+    {key:'action', label:'Действия', html:true},
+  ];
+  const webUsers = state.lists.web_users.map(r => ({
+    ...r,
+    permissions:`<div class="permission-pills">${(r.permissions || []).map(p => `<span class="pill">${esc(labels[p] || p)}</span>`).join('') || '<span class="muted">Нет</span>'}</div>`,
+    action:r.role === 'owner' ? '<span class="muted">Владелец</span>' : `<div class="actions"><button type="button" onclick="editWebUser('${esc(r.username)}')">Редактировать</button><button class="danger" onclick="removeWebUser('${esc(r.username)}')">Удалить</button></div>`
+  }));
   admins.innerHTML = `<div class="grid two"><form class="card" onsubmit="saveTgAdmin(event,this)"><h3>Telegram-админ</h3><label>User ID</label><input name="user_id"><label>Имя</label><input name="name"><button>Добавить</button></form>
   <form class="card" id="webUserForm" onsubmit="saveWebUser(event,this)"><h3>Веб-доступ администратора</h3><label>Логин</label><input name="username"><label>Пароль</label><input name="password" type="password"><label>Имя</label><input name="display_name"><label>Telegram admin ID</label><input name="telegram_admin_id"><div class="perm-grid">${perms}</div><button>Сохранить</button></form></div>
-  <div class="grid two">${tableCard('Telegram-админы', tgAdmins, ['user_id','name','action'])}${tableCard('Веб-пользователи', webUsers, ['username','role','display_name','telegram_admin_id','permissions','action'])}</div>`;
+  <div class="grid admin-tables">${tableCard('Telegram-админы', tgAdmins, ['user_id','name','action'])}${customTableCard('Веб-пользователи', webUsers, webUserCols, 'web-users-table')}</div>`;
 }
 function editWebUser(username) {
   const row = state.lists.web_users.find(u => String(u.username) === String(username));
