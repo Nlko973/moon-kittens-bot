@@ -9,6 +9,8 @@ DB_PATH = Path("data/bot.db")
 DB_PATH.parent.mkdir(exist_ok=True)
 CLEANUP_PERIOD_WEEKS = 2
 CLEANUP_INTERVAL_DAYS = CLEANUP_PERIOD_WEEKS * 7
+NEWCOMER_DAYS = 7
+DEFAULT_CLEANUP_TIME = "20:00"
 
 
 def now_iso() -> str:
@@ -256,6 +258,9 @@ def init_db():
     if get_setting("cleanup_skip_week_start", cur) is None:
         set_setting("cleanup_skip_week_start", "", cur)
 
+    if get_setting("cleanup_time", cur) is None:
+        set_setting("cleanup_time", DEFAULT_CLEANUP_TIME, cur)
+
     if get_setting("tg_links_block", cur) is None:
         set_setting("tg_links_block", "0", cur)
 
@@ -333,6 +338,36 @@ def set_cleanup_enabled(enabled: bool):
     # Enabling cleanup explicitly also clears one-time skip.
     if enabled:
         set_cleanup_skip_once(False)
+
+
+def _normalize_cleanup_time(value: str) -> str:
+    raw = (value or "").strip()
+    try:
+        hour_raw, minute_raw = raw.split(":", 1)
+        hour = int(hour_raw)
+        minute = int(minute_raw)
+    except (TypeError, ValueError):
+        raise ValueError("cleanup_time must be HH:MM")
+    if not (0 <= hour <= 23 and 0 <= minute <= 59):
+        raise ValueError("cleanup_time must be HH:MM")
+    return f"{hour:02d}:{minute:02d}"
+
+
+def get_cleanup_time() -> str:
+    raw = get_setting("cleanup_time", default=DEFAULT_CLEANUP_TIME) or DEFAULT_CLEANUP_TIME
+    try:
+        return _normalize_cleanup_time(raw)
+    except ValueError:
+        return DEFAULT_CLEANUP_TIME
+
+
+def get_cleanup_time_parts() -> tuple[int, int]:
+    hour, minute = get_cleanup_time().split(":", 1)
+    return int(hour), int(minute)
+
+
+def set_cleanup_time(value: str):
+    set_setting("cleanup_time", _normalize_cleanup_time(value))
 
 
 def set_cleanup_skip_once(enabled: bool, at: Optional[datetime] = None):
@@ -529,6 +564,29 @@ def set_user_new_status(user_id: int, is_new: bool, at: Optional[datetime] = Non
     cur.execute("UPDATE users SET first_cleanup_at = ?, updated_at = ? WHERE user_id = ?", (value, now_iso(), user_id))
     conn.commit()
     conn.close()
+
+
+def expire_newcomer_statuses(at: Optional[datetime] = None) -> int:
+    at = at or datetime.now()
+    cutoff = (at - timedelta(days=NEWCOMER_DAYS)).isoformat(timespec="seconds")
+    at_iso = at.isoformat(timespec="seconds")
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        UPDATE users
+        SET first_cleanup_at = ?, updated_at = ?
+        WHERE is_member = 1
+          AND first_cleanup_at IS NULL
+          AND first_seen_at IS NOT NULL
+          AND first_seen_at <= ?
+        """,
+        (at_iso, now_iso(), cutoff),
+    )
+    changed = cur.rowcount
+    conn.commit()
+    conn.close()
+    return int(changed)
 
 
 def mark_user_left(user_id: int):
@@ -1176,6 +1234,7 @@ def mark_inactive_warned(user_id: int):
 # cleanup
 
 def get_cleanup_candidates(week_starts: Optional[list[str] | str] = None):
+    expire_newcomer_statuses()
     if isinstance(week_starts, str):
         week_starts = [week_starts]
     week_starts = week_starts or cleanup_week_starts_for()

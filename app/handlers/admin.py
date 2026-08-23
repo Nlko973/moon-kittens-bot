@@ -19,6 +19,7 @@ from app.keyboards import (
     BTN_ADM_DB_USER_DEL,
     BTN_ADM_CLEANUP_OFF,
     BTN_ADM_CLEANUP_ON,
+    BTN_ADM_CLEANUP_RUN,
     BTN_ADM_CLEANUP_SKIP,
     BTN_ADM_CLEANUP_WHEN,
     BTN_ADM_TG_LINKS_OFF,
@@ -49,6 +50,7 @@ from app.keyboards import (
     BTN_ADM_WARNS_ALL,
 )
 from app.services.access import require_owner, require_private_admin
+from app.services.automation import is_cleanup_day, next_cleanup_dt, perform_cleanup_for_today
 from app.services.bot_config import PARAM_DEFAULTS, get_all_params, set_int_param
 from app.services.chat_settings import get_group_id, set_group_id
 from app.services.duration_parser import parse_deadline, parse_ru_duration_to_minutes
@@ -74,6 +76,7 @@ from db import (
     get_all_warns,
     get_biweekly_norm,
     get_cleanup_candidates,
+    get_cleanup_time,
     get_users_from_db,
     get_user_warns,
     get_last_cleanup_date,
@@ -88,6 +91,7 @@ from db import (
     purge_user_from_db,
     set_cleanup_enabled,
     set_cleanup_skip_once,
+    set_cleanup_time,
     set_tg_links_block_enabled,
     set_rest_until,
     set_biweekly_norm,
@@ -122,26 +126,7 @@ def _detect_local_ip() -> str:
 
 
 def _next_cleanup_dt(now: Optional[datetime] = None) -> datetime:
-    now = now or datetime.now()
-    # Sunday 23:55 local server time
-    days_ahead = (6 - now.weekday()) % 7
-    candidate = (now + timedelta(days=days_ahead)).replace(hour=23, minute=55, second=0, microsecond=0)
-    if candidate <= now:
-        candidate = (candidate + timedelta(days=7)).replace(hour=23, minute=55, second=0, microsecond=0)
-
-    last_cleanup_date = get_last_cleanup_date()
-    if not last_cleanup_date:
-        return candidate
-
-    try:
-        last_dt = datetime.fromisoformat(last_cleanup_date)
-    except ValueError:
-        return candidate
-
-    earliest = (last_dt + timedelta(days=CLEANUP_INTERVAL_DAYS)).replace(hour=23, minute=55, second=0, microsecond=0)
-    while candidate.date() < earliest.date():
-        candidate = (candidate + timedelta(days=7)).replace(hour=23, minute=55, second=0, microsecond=0)
-    return candidate
+    return next_cleanup_dt(now)
 
 
 def _cleanup_status_text() -> str:
@@ -226,6 +211,37 @@ async def cmd_cleanup_when(message: Message):
     if not await require_private_admin(message):
         return
     await message.answer(f"🧹 {_cleanup_status_text()}")
+
+
+@router.message(Command("cleanup_time"))
+async def cmd_cleanup_time(message: Message, command: CommandObject):
+    if not await require_private_admin(message):
+        return
+    raw = (command.args or "").strip()
+    if not raw:
+        await message.answer(f"Текущее время чистки: {get_cleanup_time()} МСК.\nФормат: /cleanup_time HH:MM")
+        return
+    try:
+        set_cleanup_time(raw)
+    except ValueError:
+        await message.answer("Формат: /cleanup_time HH:MM, например /cleanup_time 20:00")
+        return
+    await message.answer(f"Время чистки обновлено: {get_cleanup_time()} МСК.")
+
+
+@router.message(Command("cleanup_run"))
+async def cmd_cleanup_run(message: Message):
+    if not await require_private_admin(message):
+        return
+    now = datetime.now()
+    if not is_cleanup_day(now):
+        await message.answer(f"Сегодня не день чистки. Ближайшая чистка: {next_cleanup_dt(now).strftime('%Y-%m-%d %H:%M:%S')}.")
+        return
+    ok, detail = await perform_cleanup_for_today(now=now, manual=True)
+    if ok:
+        await message.answer("Чистка запущена вручную и отмечена проведенной.")
+    else:
+        await message.answer(detail)
 
 
 @router.message(Command("tg_links_on"))
@@ -1072,6 +1088,11 @@ async def btn_cleanup_skip(message: Message):
 @router.message(F.chat.type == ChatType.PRIVATE, F.text == BTN_ADM_CLEANUP_WHEN)
 async def btn_cleanup_when(message: Message):
     await cmd_cleanup_when(message)
+
+
+@router.message(F.chat.type == ChatType.PRIVATE, F.text == BTN_ADM_CLEANUP_RUN)
+async def btn_cleanup_run(message: Message):
+    await cmd_cleanup_run(message)
 
 
 @router.message(F.chat.type == ChatType.PRIVATE, F.text == BTN_ADM_TG_LINKS_ON)

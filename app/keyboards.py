@@ -22,6 +22,7 @@ BTN_ADM_CLEANUP_ON = "Чистка ON"
 BTN_ADM_CLEANUP_OFF = "Чистка OFF"
 BTN_ADM_CLEANUP_SKIP = "Пропуск чистки"
 BTN_ADM_CLEANUP_WHEN = "Когда чистка?"
+BTN_ADM_CLEANUP_RUN = "Запустить чистку"
 BTN_ADM_TG_LINKS_ON = "TG-ссылки ON"
 BTN_ADM_TG_LINKS_OFF = "TG-ссылки OFF"
 BTN_ADM_TG_LINKS_STATUS = "Статус TG-ссылок"
@@ -70,7 +71,7 @@ def private_admin_panel_kb(is_owner: bool) -> ReplyKeyboardMarkup:
         [KeyboardButton(text=BTN_ADM_COMPLAINTS), KeyboardButton(text=BTN_ADM_COMPLAINT_DEL)],
         [KeyboardButton(text=BTN_ADM_OWNER_MSGS), KeyboardButton(text=BTN_ADM_OWNER_MSG_DEL)],
         [KeyboardButton(text=BTN_ADM_CLEANUP_ON), KeyboardButton(text=BTN_ADM_CLEANUP_OFF), KeyboardButton(text=BTN_ADM_CLEANUP_SKIP)],
-        [KeyboardButton(text=BTN_ADM_CLEANUP_WHEN)],
+        [KeyboardButton(text=BTN_ADM_CLEANUP_WHEN), KeyboardButton(text=BTN_ADM_CLEANUP_RUN)],
         [KeyboardButton(text=BTN_ADM_TG_LINKS_ON), KeyboardButton(text=BTN_ADM_TG_LINKS_OFF), KeyboardButton(text=BTN_ADM_TG_LINKS_STATUS)],
         [KeyboardButton(text=BTN_ADM_ROLE_SET), KeyboardButton(text=BTN_ADM_ROLE_DEL)],
         [KeyboardButton(text=BTN_ADM_PROMPT_WARN), KeyboardButton(text=BTN_ADM_PROMPT_UNWARN)],

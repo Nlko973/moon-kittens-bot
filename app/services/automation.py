@@ -21,7 +21,9 @@ from db import (
     add_message,
     consume_cleanup_skip_once,
     delete_absent_over_30_days,
+    expire_newcomer_statuses,
     get_cleanup_candidates,
+    get_cleanup_time_parts,
     get_expired_mutes,
     get_biweekly_norm,
     get_inactive_candidates,
@@ -226,6 +228,80 @@ async def run_week_cleanup():
         pass
 
 
+def next_cleanup_dt(now: Optional[datetime] = None) -> datetime:
+    now = now or datetime.now()
+    cleanup_hour, cleanup_minute = get_cleanup_time_parts()
+    days_ahead = (6 - now.weekday()) % 7
+    candidate = (now + timedelta(days=days_ahead)).replace(
+        hour=cleanup_hour,
+        minute=cleanup_minute,
+        second=0,
+        microsecond=0,
+    )
+
+    last_cleanup_date = get_last_cleanup_date()
+    if not last_cleanup_date:
+        return candidate
+
+    try:
+        last_dt = datetime.fromisoformat(last_cleanup_date)
+    except ValueError:
+        return candidate
+
+    earliest = (last_dt + timedelta(days=CLEANUP_INTERVAL_DAYS)).replace(
+        hour=cleanup_hour,
+        minute=cleanup_minute,
+        second=0,
+        microsecond=0,
+    )
+    while candidate.date() < earliest.date():
+        candidate = (candidate + timedelta(days=7)).replace(
+            hour=cleanup_hour,
+            minute=cleanup_minute,
+            second=0,
+            microsecond=0,
+        )
+    return candidate
+
+
+def is_cleanup_day(now: Optional[datetime] = None) -> bool:
+    now = now or datetime.now()
+    return next_cleanup_dt(now).date() == now.date()
+
+
+async def perform_cleanup_for_today(now: Optional[datetime] = None, manual: bool = False) -> tuple[bool, str]:
+    now = now or datetime.now()
+    today = now.date().isoformat()
+
+    if manual and not is_cleanup_day(now):
+        return False, f"Cleanup can be run manually only on cleanup day: {next_cleanup_dt(now).date().isoformat()}"
+
+    last_cleanup_date = get_last_cleanup_date()
+    if last_cleanup_date == today:
+        return False, "Cleanup has already been recorded for today."
+
+    if last_cleanup_date:
+        try:
+            last_dt = datetime.fromisoformat(last_cleanup_date)
+            if (now.date() - last_dt.date()).days < CLEANUP_INTERVAL_DAYS:
+                return False, f"Next cleanup day is {next_cleanup_dt(now).date().isoformat()}."
+        except ValueError:
+            pass
+
+    group_id = get_group_id()
+    expire_newcomer_statuses(at=now)
+    rows = get_cleanup_candidates()
+    if consume_cleanup_skip_once(at=now):
+        await bot.send_message(group_id, "🧹 Чистка за 2 недели пропущена (одноразовый пропуск).")
+    elif not is_cleanup_enabled() and not manual:
+        pass
+    else:
+        await run_week_cleanup()
+    mark_users_seen_first_cleanup([int(row["user_id"]) for row in rows], at=now)
+    set_last_cleanup_date(today)
+    return True, "Cleanup completed."
+
+
 async def run_inactivity_checks():
     if not is_inactive_checks_enabled():
         return
@@ -292,31 +368,9 @@ async def _run_job_with_timeout(coro, timeout_seconds: int, label: str) -> bool:
     return False
 
 
-def _next_due_sunday(now: Optional[datetime] = None) -> datetime:
-    now = now or datetime.now()
-    days_ahead = (6 - now.weekday()) % 7
-    candidate = (now + timedelta(days=days_ahead)).replace(hour=23, minute=55, second=0, microsecond=0)
-    if candidate <= now:
-        candidate = (candidate + timedelta(days=7)).replace(hour=23, minute=55, second=0, microsecond=0)
-
-    last_cleanup_date = get_last_cleanup_date()
-    if not last_cleanup_date:
-        return candidate
-
-    try:
-        last_dt = datetime.fromisoformat(last_cleanup_date)
-    except ValueError:
-        return candidate
-
-    earliest = (last_dt + timedelta(days=CLEANUP_INTERVAL_DAYS)).replace(hour=23, minute=55, second=0, microsecond=0)
-    while candidate.date() < earliest.date():
-        candidate = (candidate + timedelta(days=7)).replace(hour=23, minute=55, second=0, microsecond=0)
-    return candidate
-
-
 def _is_cleanup_friday(now: Optional[datetime] = None) -> bool:
     now = now or datetime.now()
-    return now.weekday() == 4 and _next_due_sunday(now).date() == (now.date() + timedelta(days=2))
+    return now.weekday() == 4 and next_cleanup_dt(now).date() == (now.date() + timedelta(days=2))
 
 
 async def background_jobs():
@@ -337,36 +391,12 @@ async def background_jobs():
                 if ok:
                     last_friday_report = today
 
-        if now.weekday() == 6 and (now.hour, now.minute) >= (23, 55):
-            today = now.date().isoformat()
-            last_cleanup_date = get_last_cleanup_date()
-            cleanup_due = last_cleanup_date != today
-            if cleanup_due and last_cleanup_date:
-                try:
-                    last_dt = datetime.fromisoformat(last_cleanup_date)
-                    cleanup_due = (now.date() - last_dt.date()).days >= CLEANUP_INTERVAL_DAYS
-                except ValueError:
-                    cleanup_due = True
-
-            if cleanup_due:
-
-                async def _sunday_cleanup_once():
-                    group_id = get_group_id()
-                    rows = get_cleanup_candidates()
-                    if consume_cleanup_skip_once():
-                        await bot.send_message(group_id, "?? Чистка за 2 недели пропущена (одноразовый пропуск).")
-                    elif not is_cleanup_enabled():
-                        pass
-                    else:
-                        await run_week_cleanup()
-                    mark_users_seen_first_cleanup([int(row["user_id"]) for row in rows], at=now)
-                    set_last_cleanup_date(today)
-
-                await _run_job_with_timeout(
-                    _sunday_cleanup_once(),
-                    timeout_seconds=300,
-                    label="sunday cleanup",
-                )
+        if now >= next_cleanup_dt(now):
+            await _run_job_with_timeout(
+                perform_cleanup_for_today(now=now),
+                timeout_seconds=300,
+                label="sunday cleanup",
+            )
 
         await _run_job_with_timeout(
             run_unmute_checks(),
@@ -382,9 +412,10 @@ async def background_jobs():
             )
             if ok:
                 try:
+                    expire_newcomer_statuses()
                     delete_absent_over_30_days()
                 except Exception:
-                    logger.exception("Background job failed: delete_absent_over_30_days")
+                    logger.exception("Background job failed: daily maintenance")
                 last_daily_run = now.date().isoformat()
 
         await asyncio.sleep(30)

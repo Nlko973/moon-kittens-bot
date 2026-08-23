@@ -14,6 +14,7 @@ from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import BufferedInputFile
 
 from app.runtime import bot
+from app.services.automation import is_cleanup_day, next_cleanup_dt, perform_cleanup_for_today
 from app.services.bot_config import PARAM_DEFAULTS, get_all_params, set_int_param
 from app.services.chat_settings import get_group_id, set_group_id
 from app.services.duration_parser import parse_deadline, parse_ru_duration_to_minutes
@@ -44,6 +45,8 @@ from db import (
     get_biweekly_norm,
     get_bot_access_blocks,
     get_cleanup_candidates,
+    get_cleanup_time,
+    expire_newcomer_statuses,
     get_conn,
     get_flood_info_channel_url,
     get_users_from_db,
@@ -64,6 +67,7 @@ from db import (
     set_cleanup_enabled,
     set_flood_info_channel_url,
     set_cleanup_skip_once,
+    set_cleanup_time,
     set_inactive_checks_enabled,
     set_owner_notification_duplicate_ids,
     set_rest_until,
@@ -278,6 +282,7 @@ async def api_me(request: web.Request):
 
 @_require("view")
 async def api_state(request: web.Request):
+    expire_newcomer_statuses()
     norm_2w = get_biweekly_norm()
     cleanup_rows = get_cleanup_candidates()
     lacking = sum(
@@ -301,6 +306,9 @@ async def api_state(request: web.Request):
                 "group_id": get_group_id(),
                 "norm_2w": norm_2w,
                 "cleanup_enabled": is_cleanup_enabled(),
+                "cleanup_time": get_cleanup_time(),
+                "next_cleanup_at": next_cleanup_dt().isoformat(timespec="seconds"),
+                "cleanup_is_today": is_cleanup_day(),
                 "cleanup_skip_once": is_cleanup_skip_once_enabled(),
                 "inactive_checks_enabled": is_inactive_checks_enabled(),
                 "owner_notification_duplicate_ids": get_owner_notification_duplicate_ids(),
@@ -341,6 +349,11 @@ async def api_config(request: web.Request):
         set_biweekly_norm(norm_2w)
     if "cleanup_enabled" in data:
         set_cleanup_enabled(bool(data["cleanup_enabled"]))
+    if "cleanup_time" in data:
+        try:
+            set_cleanup_time(str(data.get("cleanup_time") or ""))
+        except ValueError:
+            raise web.HTTPBadRequest(text="cleanup_time должен быть в формате HH:MM")
     if "inactive_checks_enabled" in data:
         set_inactive_checks_enabled(bool(data["inactive_checks_enabled"]))
     if "owner_notification_duplicate_ids" in data:
@@ -365,6 +378,14 @@ async def api_config(request: web.Request):
             raise web.HTTPBadRequest(text=f"{name} должен быть больше 0")
         set_int_param(name, value)
     return web.json_response({"ok": True})
+
+
+@_require("cleanup")
+async def api_cleanup_run(request: web.Request):
+    ok, detail = await perform_cleanup_for_today(manual=True)
+    if not ok:
+        raise web.HTTPBadRequest(text=detail)
+    return web.json_response({"ok": True, "message": "Чистка запущена вручную и отмечена проведенной."})
 
 
 @_require("admins")
@@ -601,6 +622,7 @@ def create_web_app() -> web.Application:
     app.router.add_get("/api/me", api_me)
     app.router.add_get("/api/state", api_state)
     app.router.add_post("/api/config", api_config)
+    app.router.add_post("/api/cleanup/run", api_cleanup_run)
     app.router.add_post("/api/telegram-admins", api_telegram_admins)
     app.router.add_post("/api/web-users", api_web_users)
     app.router.add_post("/api/moderation", api_moderation)
@@ -855,6 +877,7 @@ function renderSettings() {
     <div class="grid three"><div><label>GROUP_ID</label><input name="group_id" value="${esc(c.group_id)}"></div><div><label>Норма за 2 недели</label><input name="norm_2w" value="${esc(c.norm_2w)}"></div><div><label>TG-ссылки</label><select name="tg_links_block"><option value="0">Разрешены</option><option value="1" ${c.tg_links_block?'selected':''}>Запрещены</option></select></div></div>
     <label>Дублировать ЛС влд для Telegram ID</label><input name="owner_notification_duplicate_ids" value="${esc((c.owner_notification_duplicate_ids || []).join(', '))}" placeholder="123456789, 987654321">
     <label>Ссылка на инфо канал флуда</label><input name="flood_info_channel_url" value="${esc(c.flood_info_channel_url || '')}" placeholder="https://t.me/...">
+    <label>Cleanup time MSK</label><input name="cleanup_time" type="time" value="${esc(c.cleanup_time || '20:00')}">
     <div class="perm-grid">${duplicateAdmins}</div>
     <div class="grid three">${Object.entries(params).map(([k,v])=>`<div><label>${esc(k)}</label><input name="param_${esc(k)}" value="${esc(v)}"></div>`).join('')}</div>
     <div class="row" style="margin-top:12px"><label class="check"><input type="checkbox" name="cleanup_enabled" ${c.cleanup_enabled?'checked':''}> Авточистка</label><label class="check"><input type="checkbox" name="inactive_checks_enabled" ${c.inactive_checks_enabled?'checked':''}> Уведомления и варны за неактив</label><label class="check"><input type="checkbox" name="cleanup_skip_once"> Пропустить ближайшую чистку</label></div><div class="row"><button>Сохранить</button><button type="button" class="danger" onclick="restartBot()">Перезагрузить бота</button></div></form>`;
@@ -864,7 +887,7 @@ async function saveConfig(event, form) {
   const fd = new FormData(form), params = {};
   for (const [k,v] of fd.entries()) if (k.startsWith('param_')) params[k.slice(6)] = v;
   const duplicateIds = [fd.get('owner_notification_duplicate_ids'), ...fd.getAll('duplicate_admin_ids')].filter(Boolean).join(', ');
-  await post('/api/config', {group_id:fd.get('group_id'), norm_2w:fd.get('norm_2w'), owner_notification_duplicate_ids:duplicateIds, tg_links_block:fd.get('tg_links_block') === '1', flood_info_channel_url:fd.get('flood_info_channel_url'), cleanup_enabled:fd.has('cleanup_enabled'), inactive_checks_enabled:fd.has('inactive_checks_enabled'), cleanup_skip_once:fd.has('cleanup_skip_once'), params});
+  await post('/api/config', {group_id:fd.get('group_id'), norm_2w:fd.get('norm_2w'), cleanup_time:fd.get('cleanup_time'), owner_notification_duplicate_ids:duplicateIds, tg_links_block:fd.get('tg_links_block') === '1', flood_info_channel_url:fd.get('flood_info_channel_url'), cleanup_enabled:fd.has('cleanup_enabled'), inactive_checks_enabled:fd.has('inactive_checks_enabled'), cleanup_skip_once:fd.has('cleanup_skip_once'), params});
   toastMsg('Конфиг сохранён'); await loadState();
 }
 async function restartBot() {
@@ -910,14 +933,21 @@ function renderMessages() {
 function renderCleanup() {
   if (!can('cleanup')) return;
   const c = state.config;
+  const cleanupTools = `<form class="card" onsubmit="saveCleanup(event,this)"><h3>Cleanup controls</h3><div class="row"><label class="check"><input type="checkbox" name="cleanup_enabled" ${c.cleanup_enabled?'checked':''}> Auto cleanup</label><label><span>Time MSK</span><input name="cleanup_time" type="time" value="${esc(c.cleanup_time || '20:00')}"></label><label class="check"><input type="checkbox" name="cleanup_skip_once"> Skip next cleanup</label><button>Save</button><button type="button" class="danger" onclick="runCleanupNow()" ${c.cleanup_is_today?'':'disabled'}>Run cleanup</button></div><p class="muted">Next cleanup: ${esc(c.next_cleanup_at || '')}</p></form>`;
   const rows = (state.lists.cleanup_candidates || []).map(r => ({...r, status:!r.first_cleanup_at ? '🆕 нью' : (Number(r.count || 0) >= Number(c.norm_2w || 0) ? 'ok' : 'ниже нормы')}));
   cleanup.innerHTML = `<form class="card" onsubmit="saveCleanup(event,this)"><h3>Чистка</h3><div class="row"><label class="check"><input type="checkbox" name="cleanup_enabled" ${c.cleanup_enabled?'checked':''}> Авточистка включена</label><label class="check"><input type="checkbox" name="cleanup_skip_once"> Пропустить ближайшую чистку</label><button>Сохранить</button></div></form>${tableCard('Кандидаты по норме', rows, ['user_id','display_name','first_seen_at','count','status'])}`;
+  cleanup.innerHTML = cleanupTools + tableCard('Cleanup candidates', rows, ['user_id','display_name','first_seen_at','count','status']);
 }
 async function saveCleanup(event, form) {
   event.preventDefault();
   const fd = new FormData(form);
-  await post('/api/config', {cleanup_enabled:fd.has('cleanup_enabled'), cleanup_skip_once:fd.has('cleanup_skip_once')});
+  await post('/api/config', {cleanup_enabled:fd.has('cleanup_enabled'), cleanup_time:fd.get('cleanup_time'), cleanup_skip_once:fd.has('cleanup_skip_once')});
   toastMsg('Настройки чистки сохранены');
+  await loadState();
+}
+async function runCleanupNow() {
+  const data = await post('/api/cleanup/run', {});
+  toastMsg(data.message || 'Cleanup completed');
   await loadState();
 }
 function renderAdmins() {
