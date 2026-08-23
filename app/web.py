@@ -877,7 +877,7 @@ function renderSettings() {
     <div class="grid three"><div><label>GROUP_ID</label><input name="group_id" value="${esc(c.group_id)}"></div><div><label>Норма за 2 недели</label><input name="norm_2w" value="${esc(c.norm_2w)}"></div><div><label>TG-ссылки</label><select name="tg_links_block"><option value="0">Разрешены</option><option value="1" ${c.tg_links_block?'selected':''}>Запрещены</option></select></div></div>
     <label>Дублировать ЛС влд для Telegram ID</label><input name="owner_notification_duplicate_ids" value="${esc((c.owner_notification_duplicate_ids || []).join(', '))}" placeholder="123456789, 987654321">
     <label>Ссылка на инфо канал флуда</label><input name="flood_info_channel_url" value="${esc(c.flood_info_channel_url || '')}" placeholder="https://t.me/...">
-    <label>Cleanup time MSK</label><input name="cleanup_time" type="time" value="${esc(c.cleanup_time || '20:00')}">
+    <label>Время чистки по МСК</label><input name="cleanup_time" type="time" value="${esc(c.cleanup_time || '20:00')}">
     <div class="perm-grid">${duplicateAdmins}</div>
     <div class="grid three">${Object.entries(params).map(([k,v])=>`<div><label>${esc(k)}</label><input name="param_${esc(k)}" value="${esc(v)}"></div>`).join('')}</div>
     <div class="row" style="margin-top:12px"><label class="check"><input type="checkbox" name="cleanup_enabled" ${c.cleanup_enabled?'checked':''}> Авточистка</label><label class="check"><input type="checkbox" name="inactive_checks_enabled" ${c.inactive_checks_enabled?'checked':''}> Уведомления и варны за неактив</label><label class="check"><input type="checkbox" name="cleanup_skip_once"> Пропустить ближайшую чистку</label></div><div class="row"><button>Сохранить</button><button type="button" class="danger" onclick="restartBot()">Перезагрузить бота</button></div></form>`;
@@ -933,10 +933,10 @@ function renderMessages() {
 function renderCleanup() {
   if (!can('cleanup')) return;
   const c = state.config;
-  const cleanupTools = `<form class="card" onsubmit="saveCleanup(event,this)"><h3>Cleanup controls</h3><div class="row"><label class="check"><input type="checkbox" name="cleanup_enabled" ${c.cleanup_enabled?'checked':''}> Auto cleanup</label><label><span>Time MSK</span><input name="cleanup_time" type="time" value="${esc(c.cleanup_time || '20:00')}"></label><label class="check"><input type="checkbox" name="cleanup_skip_once"> Skip next cleanup</label><button>Save</button><button type="button" class="danger" onclick="runCleanupNow()" ${c.cleanup_is_today?'':'disabled'}>Run cleanup</button></div><p class="muted">Next cleanup: ${esc(c.next_cleanup_at || '')}</p></form>`;
+  const cleanupTools = `<form class="card" onsubmit="saveCleanup(event,this)"><h3>Управление чисткой</h3><div class="row"><label class="check"><input type="checkbox" name="cleanup_enabled" ${c.cleanup_enabled?'checked':''}> Авточистка включена</label><label><span>Время по МСК</span><input name="cleanup_time" type="time" value="${esc(c.cleanup_time || '20:00')}"></label><label class="check"><input type="checkbox" name="cleanup_skip_once"> Пропустить ближайшую чистку</label><button>Сохранить</button><button type="button" class="danger" onclick="runCleanupNow()" ${c.cleanup_is_today?'':'disabled'}>Запустить чистку</button></div><p class="muted">Ближайшая чистка: ${esc(c.next_cleanup_at || '')}</p></form>`;
   const rows = (state.lists.cleanup_candidates || []).map(r => ({...r, status:!r.first_cleanup_at ? '🆕 нью' : (Number(r.count || 0) >= Number(c.norm_2w || 0) ? 'ok' : 'ниже нормы')}));
   cleanup.innerHTML = `<form class="card" onsubmit="saveCleanup(event,this)"><h3>Чистка</h3><div class="row"><label class="check"><input type="checkbox" name="cleanup_enabled" ${c.cleanup_enabled?'checked':''}> Авточистка включена</label><label class="check"><input type="checkbox" name="cleanup_skip_once"> Пропустить ближайшую чистку</label><button>Сохранить</button></div></form>${tableCard('Кандидаты по норме', rows, ['user_id','display_name','first_seen_at','count','status'])}`;
-  cleanup.innerHTML = cleanupTools + tableCard('Cleanup candidates', rows, ['user_id','display_name','first_seen_at','count','status']);
+  cleanup.innerHTML = cleanupTools + tableCard('Кандидаты по норме', rows, ['user_id','display_name','first_seen_at','count','status']);
 }
 async function saveCleanup(event, form) {
   event.preventDefault();
@@ -947,7 +947,7 @@ async function saveCleanup(event, form) {
 }
 async function runCleanupNow() {
   const data = await post('/api/cleanup/run', {});
-  toastMsg(data.message || 'Cleanup completed');
+  toastMsg(data.message || 'Чистка проведена');
   await loadState();
 }
 function renderAdmins() {
